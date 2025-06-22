@@ -1,0 +1,15 @@
+{
+  "name": "paper-reading-assistant",
+  "version": "1.0.0",
+  "description": "Automatically read, translate, and extract key insights from research papers.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Anton Yang",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^36.5.0"
+  }
+}
