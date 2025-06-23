@@ -11,5 +11,10 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^36.5.0"
+  },
+  "dependencies": {
+    "@electron/remote": "^2.1.2",
+    "axios": "^1.10.0",
+    "pdfjs-dist": "^5.3.31"
   }
 }
