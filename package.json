@@ -5,16 +5,67 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "build": "electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Anton Yang",
   "license": "MIT",
+  "build": {
+    "appId": "com.paperreading.assistant",
+    "productName": "论文阅读助手",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*",
+      "!dist/**/*",
+      "!create-icon.js",
+      "!*.log"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "论文阅读助手"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
+  },
   "devDependencies": {
-    "electron": "^36.5.0"
+    "electron": "^36.5.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
   },
   "dependencies": {
     "@electron/remote": "^2.1.2",
     "axios": "^1.10.0",
+    "marked": "^15.0.12",
+    "openai": "^5.7.0",
     "pdfjs-dist": "^5.3.31"
   }
 }

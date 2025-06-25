@@ -63,6 +63,7 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1600,
     height: 900,
+    icon: './assets/icon.png',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -75,7 +76,7 @@ const createWindow = () => {
   win.loadFile('index.html')
   
   // 开发时打开开发者工具
-  win.webContents.openDevTools()
+  // win.webContents.openDevTools()
 }
 
 app.whenReady().then(() => {
