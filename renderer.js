@@ -165,7 +165,15 @@ class PaperReader {
       if (this.currentPdf && this.currentPage) {
         this.showPDFPage(this.currentPage);
       }
+      
+      // 延迟更新缩放比例显示
+      setTimeout(() => {
+        this.updateCurrentZoomDisplay();
+      }, 200);
     });
+
+    // 添加分割条拖动功能
+    this.setupResizer();
 
     // 缩放控制相关事件
     document.getElementById('zoom-input').addEventListener('input', (e) => {
@@ -234,61 +242,70 @@ class PaperReader {
   }
 
   handleWheelScroll(e) {
-    if (!this.currentPdf) return;
+    try {
+      if (!this.currentPdf) return;
 
-    // 按住Ctrl键时，滚轮用于缩放
-    if (e.ctrlKey) {
-      e.preventDefault();
-      
-      // 使用保存的适应宽度和适应页面的缩放比例
-      const fitWidthScale = this.fitWidthScale;
-      const fitPageScale = this.fitPageScale;
-      
-      // 向上滚动放大，向下滚动缩小
-      const zoomStep = 10; // 每次缩放10%
-      if (e.deltaY < 0) {
-        // 向上滚动，放大
-        const newZoom = this.currentZoom + zoomStep;
-        const maxZoom = Math.round(fitWidthScale * 100);
-        this.currentZoom = Math.min(maxZoom, newZoom);
-      } else {
-        // 向下滚动，缩小
-        const newZoom = this.currentZoom - zoomStep;
-        const minZoom = Math.round(fitPageScale * 100);
-        this.currentZoom = Math.max(minZoom, newZoom);
-      }
-      
-      // 切换到自定义模式并更新页面
-      this.zoomMode = 'custom';
-      this.updateZoomButtons();
-      this.showPDFPage(this.currentPage);
-    } else {
-      // 不按Ctrl键时，根据缩放比例决定滚轮行为
-      const currentScale = this.currentZoom / 100;
-      const fitPageScale = this.fitPageScale;
-      
-      // 如果缩放比例大于适应页面，滚轮用于滚动
-      // 如果缩放比例小于等于适应页面，滚轮用于翻页
-      if (currentScale > fitPageScale) {
-        // 不阻止默认行为，让滚轮用于滚动
-        // 不需要做任何处理，让浏览器默认的滚动行为生效
-        return; // 直接返回，不阻止默认行为
-      } else {
-        // 阻止默认行为，滚轮用于翻页
+      // 按住Ctrl键时，滚轮用于缩放
+      if (e.ctrlKey) {
         e.preventDefault();
         
-        // 向上滚动翻到下一页，向下滚动翻到上一页
-        if (e.deltaY > 0) {
-          // 向下滚动，翻到下一页
-          if (this.currentPage < this.totalPages) {
-            this.showPDFPage(this.currentPage + 1);
-          }
+        // 使用保存的适应宽度和适应页面的缩放比例
+        const fitWidthScale = this.fitWidthScale;
+        const fitPageScale = this.fitPageScale;
+        
+        // 向上滚动放大，向下滚动缩小
+        const zoomStep = 10; // 每次缩放10%
+        if (e.deltaY < 0) {
+          // 向上滚动，放大
+          const newZoom = this.currentZoom + zoomStep;
+          const maxZoom = Math.round(fitWidthScale * 100);
+          this.currentZoom = Math.min(maxZoom, newZoom);
         } else {
-          // 向上滚动，翻到上一页
-          if (this.currentPage > 1) {
-            this.showPDFPage(this.currentPage - 1);
+          // 向下滚动，缩小
+          const newZoom = this.currentZoom - zoomStep;
+          const minZoom = Math.round(fitPageScale * 100);
+          this.currentZoom = Math.max(minZoom, newZoom);
+        }
+        
+        // 切换到自定义模式并更新页面
+        this.zoomMode = 'custom';
+        this.updateZoomButtons();
+        this.showPDFPage(this.currentPage);
+      } else {
+        // 不按Ctrl键时，根据缩放比例决定滚轮行为
+        const currentScale = this.currentZoom / 100;
+        const fitPageScale = this.fitPageScale;
+        
+        // 如果缩放比例大于适应页面，滚轮用于滚动
+        // 如果缩放比例小于等于适应页面，滚轮用于翻页
+        if (currentScale > fitPageScale) {
+          // 不阻止默认行为，让滚轮用于滚动
+          // 不需要做任何处理，让浏览器默认的滚动行为生效
+          return; // 直接返回，不阻止默认行为
+        } else {
+          // 阻止默认行为，滚轮用于翻页
+          e.preventDefault();
+          
+          // 向上滚动翻到下一页，向下滚动翻到上一页
+          if (e.deltaY > 0) {
+            // 向下滚动，翻到下一页
+            if (this.currentPage < this.totalPages) {
+              this.showPDFPage(this.currentPage + 1);
+            }
+          } else {
+            // 向上滚动，翻到上一页
+            if (this.currentPage > 1) {
+              this.showPDFPage(this.currentPage - 1);
+            }
           }
         }
+      }
+    } catch (error) {
+      console.error('滚轮缩放时出错:', error);
+      // 显示错误信息到翻译区域，但不阻断正常功能
+      const container = document.getElementById('translation-content');
+      if (container) {
+        container.innerHTML = `<div class="error">页面渲染出错: ${error.message}</div>`;
       }
     }
   }
@@ -922,13 +939,43 @@ class PaperReader {
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('toggle-sidebar');
     
-    if (sidebar.classList.contains('collapsed')) {
+    // 检查当前状态
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    
+    if (isCollapsed) {
+      // 展开大纲
       sidebar.classList.remove('collapsed');
       toggleBtn.textContent = '←';
     } else {
+      // 折叠大纲
       sidebar.classList.add('collapsed');
       toggleBtn.textContent = '☰';
     }
+    
+    // 在动画过程中持续重绘高亮
+    const animationDuration = 300; // 与CSS过渡时间一致
+    const interval = 16; // 约60fps
+    const steps = Math.ceil(animationDuration / interval);
+    let currentStep = 0;
+    
+    const animateHighlights = () => {
+      if (currentStep < steps) {
+        // 重新计算高亮框位置
+        if (this.recalculateHighlights) {
+          this.recalculateHighlights();
+        }
+        currentStep++;
+        setTimeout(animateHighlights, interval);
+      } else {
+        // 动画结束，最后重绘一次
+        if (this.recalculateHighlights) {
+          this.recalculateHighlights();
+        }
+      }
+    };
+    
+    // 开始动画
+    animateHighlights();
   }
 
   async extractOutline() {
@@ -990,9 +1037,31 @@ class PaperReader {
     const minIndex = Math.min(startIndex, endIndex);
     const maxIndex = Math.max(startIndex, endIndex);
     
+    // 以原始文本块为最小选择单位，直接选择范围内的所有文本项
     for (let i = minIndex; i <= maxIndex; i++) {
       items.push(textContent.items[i]);
     }
+    
+    return items;
+  }
+
+  // 获取同一行的文本项
+  getItemsInSameLine(item, textContent) {
+    if (!item || !textContent) return [];
+    
+    const items = [];
+    const itemY = item.transform[5];
+    const tolerance = 2; // 容差，用于判断是否在同一行
+    
+    textContent.items.forEach(textItem => {
+      const textItemY = textItem.transform[5];
+      if (Math.abs(textItemY - itemY) <= tolerance) {
+        items.push(textItem);
+      }
+    });
+    
+    // 按X坐标排序
+    items.sort((a, b) => a.transform[4] - b.transform[4]);
     
     return items;
   }
@@ -1005,6 +1074,11 @@ class PaperReader {
         overlay.parentElement.removeChild(overlay);
       }
     });
+    
+    // 清除本地数组中的引用
+    if (this.currentSelectionOverlays) {
+      this.currentSelectionOverlays.length = 0;
+    }
   }
 
   addTextSelectionSupport(canvas, page, viewport) {
@@ -1013,6 +1087,12 @@ class PaperReader {
     let endItem = null;
     let textContent = null;
     let selectionOverlays = [];
+    
+    // 将selectionOverlays保存到实例中，以便clearSelection方法可以访问
+    this.currentSelectionOverlays = selectionOverlays;
+    
+    // 设置canvas的鼠标样式为文本选择样式
+    canvas.style.cursor = 'text';
     
     // 预加载文本内容
     page.getTextContent().then(content => {
@@ -1077,6 +1157,11 @@ class PaperReader {
       const canvasRect = canvas.getBoundingClientRect();
       const containerRect = canvas.parentElement.getBoundingClientRect();
       
+      // 获取容器的滚动偏移量
+      const container = canvas.parentElement;
+      const scrollLeft = container.scrollLeft || 0;
+      const scrollTop = container.scrollTop || 0;
+      
       // 计算实际缩放比例
       const scaleX = canvasRect.width / canvas.width;
       const scaleY = canvasRect.height / canvas.height;
@@ -1092,10 +1177,10 @@ class PaperReader {
       // 需要将PDF的Y坐标转换为Canvas的Y坐标
       const canvasY = canvasRect.height - itemY - itemHeight;
       
-      // 计算相对于容器的位置
-      // 使用canvas的offsetLeft和offsetTop来获取相对于父容器的位置
-      const relativeX = itemX + canvas.offsetLeft;
-      const relativeY = canvasY + canvas.offsetTop;
+      // 计算相对于容器的位置，并减去滚动偏移量
+      // 因为高亮框是相对于容器定位的，而容器有滚动，所以需要减去滚动偏移量
+      const relativeX = itemX + canvas.offsetLeft - scrollLeft;
+      const relativeY = canvasY + canvas.offsetTop - scrollTop;
       
       // 添加调试信息
       console.log('高亮框位置调试:', {
@@ -1105,8 +1190,8 @@ class PaperReader {
         itemX, itemY, itemWidth, itemHeight,
         canvasY,
         canvasOffset: { left: canvas.offsetLeft, top: canvas.offsetTop },
-        canvasRect: { left: canvasRect.left, top: canvasRect.top, width: canvasRect.width, height: canvasRect.height },
         containerRect: { left: containerRect.left, top: containerRect.top, width: containerRect.width, height: containerRect.height },
+        scrollOffset: { left: scrollLeft, top: scrollTop },
         relativeX, relativeY
       });
       
@@ -1118,54 +1203,86 @@ class PaperReader {
       return overlay;
     };
     
-    // 高亮选中的文本项
-    const highlightSelectedItems = () => {
-      if (!startItem || !endItem || !textContent) return;
+    // 重新计算所有高亮框的位置和大小
+    const recalculateHighlights = () => {
+      if (!startItem || !endItem || !textContent || selectionOverlays.length === 0) return;
       
-      // 清除之前的高亮
+      // 清除当前高亮
       this.clearSelection();
       
-      // 获取选择范围内的所有文本项
+      // 重新创建高亮
       const selectedItems = this.getItemsInRange(startItem, endItem, textContent);
-      
-      // 创建高亮覆盖层
       selectedItems.forEach(item => {
         const highlight = createTextHighlight(item);
         highlight.classList.add('text-selection-overlay');
         canvas.parentElement.appendChild(highlight);
         selectionOverlays.push(highlight);
       });
-      
-      // 获取选中文本并翻译
-      const selectedText = selectedItems.map(item => item.str).join(' ');
-      if (selectedText.trim()) {
-        this.translateSelectedText(selectedText);
-      }
     };
     
-    // 鼠标按下事件
+    // 将recalculateHighlights方法保存到实例中，以便外部调用
+    this.recalculateHighlights = recalculateHighlights;
+    
+    // 鼠标按下事件 - 只用于取消选择
     canvas.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      isSelecting = true;
       
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       
-      startItem = getTextItemAtPosition(mouseX, mouseY);
+      const clickedItem = getTextItemAtPosition(mouseX, mouseY);
       
-      if (startItem) {
-        const highlight = createTextHighlight(startItem, 'rgba(0, 123, 255, 0.3)');
-        highlight.classList.add('text-selection-overlay');
-        canvas.parentElement.appendChild(highlight);
-        selectionOverlays.push(highlight);
+      // 如果点击了空白区域，清除选择
+      if (!clickedItem) {
+        this.clearSelection();
+        startItem = null;
+        endItem = null;
+        isSelecting = false;
+        return;
+      }
+      
+      // 如果已经有选择，清除选择（无论点击的是否是已选择的区域）
+      if (startItem && endItem && selectionOverlays.length > 0) {
+        this.clearSelection();
+        startItem = null;
+        endItem = null;
+        isSelecting = false;
+        return;
       }
     });
     
     // 鼠标移动事件
     canvas.addEventListener('mousemove', (e) => {
+      // 如果没有按下鼠标，不处理移动事件
+      if (!e.buttons || e.buttons === 0) return;
+      
+      // 如果还没有开始选择，开始选择
+      if (!isSelecting) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const startClickedItem = getTextItemAtPosition(mouseX, mouseY);
+        if (startClickedItem) {
+          isSelecting = true;
+          canvas.style.cursor = 'text';
+          startItem = startClickedItem;
+          
+          // 创建初始高亮
+          const highlight = createTextHighlight(startItem, 'rgba(0, 123, 255, 0.3)');
+          highlight.classList.add('text-selection-overlay');
+          canvas.parentElement.appendChild(highlight);
+          selectionOverlays.push(highlight);
+        }
+      }
+      
+      // 如果正在选择，继续处理
       if (!isSelecting || !startItem) return;
       e.preventDefault();
+      
+      // 保持鼠标样式为文本选择样式
+      canvas.style.cursor = 'text';
       
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
@@ -1195,14 +1312,70 @@ class PaperReader {
       if (isSelecting) {
         e.preventDefault();
         isSelecting = false;
-        highlightSelectedItems();
+        
+        // 重新计算高亮并触发翻译
+        if (startItem && endItem && textContent) {
+          // 清除当前高亮
+          this.clearSelection();
+          
+          // 重新创建高亮
+          const selectedItems = this.getItemsInRange(startItem, endItem, textContent);
+          selectedItems.forEach(item => {
+            const highlight = createTextHighlight(item);
+            highlight.classList.add('text-selection-overlay');
+            canvas.parentElement.appendChild(highlight);
+            selectionOverlays.push(highlight);
+          });
+          
+          // 获取选中文本并翻译
+          const selectedText = selectedItems.map(item => item.str).join(' ');
+          if (selectedText.trim()) {
+            this.translateSelectedText(selectedText);
+          }
+        }
+        
+        // 保持鼠标样式为文本选择样式
+        canvas.style.cursor = 'text';
       }
     });
     
-    // 双击清除选择
+    // 双击选择整行
     canvas.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      this.clearSelection();
+      
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      const clickedItem = getTextItemAtPosition(mouseX, mouseY);
+      
+      if (clickedItem) {
+        // 清除之前的选择
+        this.clearSelection();
+        
+        // 获取同一行的所有文本项
+        const lineItems = this.getItemsInSameLine(clickedItem, textContent);
+        
+        if (lineItems.length > 0) {
+          // 设置选择范围
+          startItem = lineItems[0];
+          endItem = lineItems[lineItems.length - 1];
+          
+          // 高亮显示整行
+          lineItems.forEach(item => {
+            const highlight = createTextHighlight(item, 'rgba(255, 193, 7, 0.3)');
+            highlight.classList.add('text-selection-overlay');
+            canvas.parentElement.appendChild(highlight);
+            selectionOverlays.push(highlight);
+          });
+          
+          // 获取选中文本并翻译
+          const selectedText = lineItems.map(item => item.str).join(' ');
+          if (selectedText.trim()) {
+            this.translateSelectedText(selectedText);
+          }
+        }
+      }
     });
     
     // 防止拖拽时选中文本
@@ -1214,6 +1387,41 @@ class PaperReader {
     canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault();
     });
+    
+    // 鼠标离开canvas区域时恢复默认鼠标样式
+    canvas.addEventListener('mouseleave', (e) => {
+      if (!isSelecting) {
+        canvas.style.cursor = 'default';
+      }
+    });
+    
+    // 鼠标进入canvas区域时设置文本选择样式
+    canvas.addEventListener('mouseenter', (e) => {
+      canvas.style.cursor = 'text';
+    });
+    
+    // 添加滚动事件监听器，当容器滚动时重新计算高亮框位置
+    const container = canvas.parentElement;
+    if (container) {
+      container.addEventListener('scroll', () => {
+        // 如果有选中的文本项，重新计算高亮框位置
+        if (selectionOverlays.length > 0) {
+          // 清除当前高亮
+          this.clearSelection();
+          
+          // 重新创建高亮
+          if (startItem && endItem && textContent) {
+            const selectedItems = this.getItemsInRange(startItem, endItem, textContent);
+            selectedItems.forEach(item => {
+              const highlight = createTextHighlight(item);
+              highlight.classList.add('text-selection-overlay');
+              container.appendChild(highlight);
+              selectionOverlays.push(highlight);
+            });
+          }
+        }
+      });
+    }
   }
   
   async translateSelectedText(selectedText) {
@@ -1550,6 +1758,205 @@ class PaperReader {
       container.scrollTop = scrollTop;
     }
   }
+
+  // 添加分割条拖动功能
+  setupResizer() {
+    // 防抖变量，避免拖动时过于频繁重绘
+    let highlightUpdateFrame = null;
+    let zoomUpdateTimeout = null;
+    
+    const scheduleHighlightUpdate = () => {
+      if (highlightUpdateFrame) {
+        cancelAnimationFrame(highlightUpdateFrame);
+      }
+      highlightUpdateFrame = requestAnimationFrame(() => {
+        if (this.recalculateHighlights) {
+          this.recalculateHighlights();
+        }
+        highlightUpdateFrame = null;
+      });
+    };
+    
+    const scheduleZoomUpdate = () => {
+      if (zoomUpdateTimeout) {
+        clearTimeout(zoomUpdateTimeout);
+      }
+      zoomUpdateTimeout = setTimeout(() => {
+        this.updateCurrentZoomDisplay();
+        zoomUpdateTimeout = null;
+      }, 100); // 100ms防抖
+    };
+    
+    // 水平分割条（翻译区域）
+    const resizer = document.getElementById('translation-resizer');
+    const fullSection = document.querySelector('.full-translation-section');
+    const selectionSection = document.querySelector('.selection-translation-section');
+    
+    // 设置水平分割条（翻译区域）
+    if (resizer && fullSection && selectionSection) {
+      const startDragging = (e) => {
+        e.preventDefault();
+        resizer.classList.add('dragging');
+        document.body.classList.add('resizing');
+        
+        const startY = e.clientY;
+        const startHeight = fullSection.offsetHeight;
+        const containerHeight = fullSection.parentElement.offsetHeight;
+        const resizerHeight = resizer.offsetHeight;
+        const minHeight = 100; // 最小高度
+        const maxHeight = containerHeight - resizerHeight - 80; // 最大高度
+        
+        const doDrag = (e) => {
+          const deltaY = e.clientY - startY;
+          const newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + deltaY));
+          
+          fullSection.style.flex = 'none';
+          fullSection.style.height = newHeight + 'px';
+          selectionSection.style.flex = '1';
+          
+          // 在拖动过程中实时重绘高亮选区
+          scheduleHighlightUpdate();
+          
+          // 更新缩放比例显示
+          scheduleZoomUpdate();
+        };
+        
+        const stopDragging = () => {
+          resizer.classList.remove('dragging');
+          document.body.classList.remove('resizing');
+          document.removeEventListener('mousemove', doDrag);
+          document.removeEventListener('mouseup', stopDragging);
+          
+          // 拖动结束后最后重绘一次，确保位置精确
+          if (this.recalculateHighlights) {
+            setTimeout(() => {
+              this.recalculateHighlights();
+            }, 50);
+          }
+          
+          // 拖动结束后更新缩放比例显示
+          setTimeout(() => {
+            this.updateCurrentZoomDisplay();
+          }, 100);
+        };
+        
+        document.addEventListener('mousemove', doDrag);
+        document.addEventListener('mouseup', stopDragging);
+      };
+      
+      resizer.addEventListener('mousedown', startDragging);
+    }
+    
+    // 垂直分割条（左右两栏）
+    const verticalResizer = document.getElementById('vertical-resizer');
+    const pdfContainer = document.querySelector('.pdf-container');
+    const rightPanel = document.querySelector('.right-panel');
+    
+    // 设置垂直分割条
+    if (verticalResizer && pdfContainer && rightPanel) {
+      const startVerticalDragging = (e) => {
+      e.preventDefault();
+      verticalResizer.classList.add('dragging');
+      document.body.classList.add('resizing-vertical');
+      
+      const startX = e.clientX;
+      const containerWidth = pdfContainer.parentElement.offsetWidth;
+      const resizerWidth = verticalResizer.offsetWidth;
+      const minWidth = 200; // 最小宽度
+      const maxWidth = containerWidth - resizerWidth - minWidth; // 最大宽度
+      
+      // 获取当前PDF容器的宽度
+      const startPdfWidth = pdfContainer.offsetWidth;
+      
+      const doVerticalDrag = (e) => {
+        const deltaX = e.clientX - startX;
+        const newPdfWidth = Math.max(minWidth, Math.min(maxWidth, startPdfWidth + deltaX));
+        
+        // 设置PDF容器的宽度
+        pdfContainer.style.flex = 'none';
+        pdfContainer.style.width = newPdfWidth + 'px';
+        
+        // 右侧面板自动填充剩余空间
+        rightPanel.style.flex = '1';
+        
+        // 在拖动过程中实时重绘高亮选区
+        scheduleHighlightUpdate();
+        
+        // 更新缩放比例显示
+        scheduleZoomUpdate();
+      };
+      
+      const stopVerticalDragging = () => {
+        verticalResizer.classList.remove('dragging');
+        document.body.classList.remove('resizing-vertical');
+        document.removeEventListener('mousemove', doVerticalDrag);
+        document.removeEventListener('mouseup', stopVerticalDragging);
+        
+        // 拖动结束后最后重绘一次，确保位置精确
+        if (this.recalculateHighlights) {
+          setTimeout(() => {
+            this.recalculateHighlights();
+          }, 50);
+        }
+        
+        // 拖动结束后更新缩放比例显示
+        setTimeout(() => {
+          this.updateCurrentZoomDisplay();
+        }, 100);
+      };
+      
+      document.addEventListener('mousemove', doVerticalDrag);
+      document.addEventListener('mouseup', stopVerticalDragging);
+    };
+    
+      verticalResizer.addEventListener('mousedown', startVerticalDragging);
+    }
+  }
+
+  // 计算并更新当前实际缩放比例
+  updateCurrentZoomDisplay() {
+    if (!this.currentPdf) return;
+    
+    const container = document.getElementById('pdf-viewer-container');
+    const canvas = container.querySelector('canvas');
+    
+    if (!canvas) return;
+    
+    // 获取当前容器尺寸
+    const containerWidth = container.clientWidth - 40; // 减去左右padding
+    
+    // 获取canvas的实际显示宽度
+    const canvasDisplayWidth = canvas.getBoundingClientRect().width;
+    
+    // 获取PDF页面的原始宽度（scale=1时的宽度）
+    const originalWidth = canvas.width / (canvas.height / canvas.naturalHeight || 1);
+    
+    // 如果有当前页面，重新计算原始尺寸
+    if (this.currentPage) {
+      this.currentPdf.getPage(this.currentPage).then(page => {
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        const actualScale = canvasDisplayWidth / originalViewport.width;
+        const actualZoomPercent = Math.round(actualScale * 100);
+        
+        // 更新显示的缩放比例
+        this.currentZoom = actualZoomPercent;
+        const zoomInput = document.getElementById('zoom-input');
+        if (zoomInput && zoomInput.value != actualZoomPercent) {
+          zoomInput.value = actualZoomPercent;
+        }
+        
+        // 如果当前是适应宽度模式，同时更新适应宽度的缩放比例
+        if (this.zoomMode === 'fit-width') {
+          const newContainerWidth = container.clientWidth - 40;
+          this.fitWidthScale = newContainerWidth / originalViewport.width;
+        }
+      }).catch(error => {
+        console.error('更新缩放比例时出错:', error);
+      });
+    }
+  }
+
+  // 重新渲染当前页面（保持选择状态）
 }
 
 // 初始化应用
