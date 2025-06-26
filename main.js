@@ -63,7 +63,8 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1600,
     height: 900,
-    icon: './assets/icon.png',
+    icon: './assets/icon.ico',
+    show: false, // 先不显示窗口
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -74,6 +75,12 @@ const createWindow = () => {
 
   require('@electron/remote/main').enable(win.webContents)
   win.loadFile('index.html')
+  
+  // 窗口准备好后最大化显示
+  win.once('ready-to-show', () => {
+    win.maximize()  // 最大化窗口
+    win.show()      // 显示窗口
+  })
   
   // 开发时打开开发者工具
   // win.webContents.openDevTools()
