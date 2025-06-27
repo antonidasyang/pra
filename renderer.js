@@ -27,6 +27,9 @@ class PaperReader {
     this.lastScrollTop = 0;
     this.scrollTimeout = null;
     
+    // 滚轮翻页防抖
+    this.wheelTimeout = null;
+    
     this.init();
   }
 
@@ -35,6 +38,9 @@ class PaperReader {
     this.loadAppState(); // 加载应用状态
     this.setupPDFViewer();
     this.bindEvents();
+    
+    // 检查版本更新
+    this.checkVersionUpdate();
     
     // 如果有上次的文件路径，尝试自动加载
     if (this.lastFilePath) {
@@ -272,21 +278,44 @@ class PaperReader {
         this.updateZoomButtons();
         this.showPDFPage(this.currentPage);
       } else {
-        // 不按Ctrl键时，根据缩放比例决定滚轮行为
-        const currentScale = this.currentZoom / 100;
-        const fitPageScale = this.fitPageScale;
+        // 不按Ctrl键时，检查是否需要滚动或翻页
+        const container = document.getElementById('pdf-viewer-container');
+        const hasVerticalScrollbar = container.scrollHeight > container.clientHeight;
         
-        // 如果缩放比例大于适应页面，滚轮用于滚动
-        // 如果缩放比例小于等于适应页面，滚轮用于翻页
-        if (currentScale > fitPageScale) {
-          // 不阻止默认行为，让滚轮用于滚动
-          // 不需要做任何处理，让浏览器默认的滚动行为生效
-          return; // 直接返回，不阻止默认行为
+        if (hasVerticalScrollbar) {
+          // 有滚动条时，检查是否已滚动到顶部或底部
+          const isAtTop = container.scrollTop <= 0;
+          const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+          
+          if ((e.deltaY < 0 && isAtTop) || (e.deltaY > 0 && isAtBottom)) {
+            // 在顶部向上滚动或在底部向下滚动时，进行翻页
+            e.preventDefault();
+            if (e.deltaY > 0) {
+              // 向下滚动，翻到下一页
+              if (this.currentPage < this.totalPages) {
+                this.showPDFPage(this.currentPage + 1);
+              }
+            } else {
+              // 向上滚动，翻到上一页
+              if (this.currentPage > 1) {
+                this.showPDFPage(this.currentPage - 1);
+              }
+            }
+          }
+          // 其他情况下不阻止默认行为，让浏览器处理滚动
         } else {
-          // 阻止默认行为，滚轮用于翻页
+          // 没有滚动条时，直接翻页
           e.preventDefault();
           
-          // 向上滚动翻到下一页，向下滚动翻到上一页
+          // 添加防抖机制，避免过快翻页
+          if (this.wheelTimeout) {
+            return;
+          }
+          
+          this.wheelTimeout = setTimeout(() => {
+            this.wheelTimeout = null;
+          }, 150); // 150ms防抖间隔
+          
           if (e.deltaY > 0) {
             // 向下滚动，翻到下一页
             if (this.currentPage < this.totalPages) {
@@ -301,7 +330,7 @@ class PaperReader {
         }
       }
     } catch (error) {
-      console.error('滚轮缩放时出错:', error);
+      console.error('滚轮处理时出错:', error);
       // 显示错误信息到翻译区域，但不阻断正常功能
       const container = document.getElementById('translation-content');
       if (container) {
@@ -1794,57 +1823,91 @@ class PaperReader {
     
     // 设置水平分割条（翻译区域）
     if (resizer && fullSection && selectionSection) {
+      let horizontalDragTimeout = null;
+      let isHorizontalDragging = false;
+      
       const startDragging = (e) => {
-        e.preventDefault();
-        resizer.classList.add('dragging');
-        document.body.classList.add('resizing');
-        
-        const startY = e.clientY;
-        const startHeight = fullSection.offsetHeight;
-        const containerHeight = fullSection.parentElement.offsetHeight;
-        const resizerHeight = resizer.offsetHeight;
-        const minHeight = 100; // 最小高度
-        const maxHeight = containerHeight - resizerHeight - 80; // 最大高度
-        
-        const doDrag = (e) => {
-          const deltaY = e.clientY - startY;
-          const newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + deltaY));
-          
-          fullSection.style.flex = 'none';
-          fullSection.style.height = newHeight + 'px';
-          selectionSection.style.flex = '1';
-          
-          // 在拖动过程中实时重绘高亮选区
-          scheduleHighlightUpdate();
-          
-          // 更新缩放比例显示
-          scheduleZoomUpdate();
-        };
-        
-        const stopDragging = () => {
-          resizer.classList.remove('dragging');
-          document.body.classList.remove('resizing');
-          document.removeEventListener('mousemove', doDrag);
-          document.removeEventListener('mouseup', stopDragging);
-          
-          // 拖动结束后最后重绘一次，确保位置精确
-          if (this.recalculateHighlights) {
-            setTimeout(() => {
-              this.recalculateHighlights();
-            }, 50);
+        // 延迟150ms再开始拖拽，给双击事件留时间
+        horizontalDragTimeout = setTimeout(() => {
+          if (!isHorizontalDragging) {
+            isHorizontalDragging = true;
+            e.preventDefault();
+            resizer.classList.add('dragging');
+            document.body.classList.add('resizing');
+            
+            const startY = e.clientY;
+            const startHeight = fullSection.offsetHeight;
+            const containerHeight = fullSection.parentElement.offsetHeight;
+            const resizerHeight = resizer.offsetHeight;
+            const minHeight = 100; // 最小高度
+            const maxHeight = containerHeight - resizerHeight - 80; // 最大高度
+            
+            const doDrag = (e) => {
+              const deltaY = e.clientY - startY;
+              const newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + deltaY));
+              
+              fullSection.style.flex = 'none';
+              fullSection.style.height = newHeight + 'px';
+              selectionSection.style.flex = '1';
+              
+              // 在拖动过程中实时重绘高亮选区
+              scheduleHighlightUpdate();
+              
+              // 更新缩放比例显示
+              scheduleZoomUpdate();
+            };
+            
+            const stopDragging = () => {
+              isHorizontalDragging = false;
+              resizer.classList.remove('dragging');
+              document.body.classList.remove('resizing');
+              document.removeEventListener('mousemove', doDrag);
+              document.removeEventListener('mouseup', stopDragging);
+              
+              // 拖动结束后最后重绘一次，确保位置精确
+              if (this.recalculateHighlights) {
+                setTimeout(() => {
+                  this.recalculateHighlights();
+                }, 50);
+              }
+              
+              // 拖动结束后更新缩放比例显示
+              setTimeout(() => {
+                this.updateCurrentZoomDisplay();
+              }, 100);
+            };
+            
+            document.addEventListener('mousemove', doDrag);
+            document.addEventListener('mouseup', stopDragging);
           }
-          
-          // 拖动结束后更新缩放比例显示
-          setTimeout(() => {
-            this.updateCurrentZoomDisplay();
-          }, 100);
-        };
-        
-        document.addEventListener('mousemove', doDrag);
-        document.addEventListener('mouseup', stopDragging);
+        }, 150);
+      };
+      
+      // mouseup时清除拖拽超时
+      const clearHorizontalDragTimeout = () => {
+        if (horizontalDragTimeout) {
+          clearTimeout(horizontalDragTimeout);
+          horizontalDragTimeout = null;
+        }
+        isHorizontalDragging = false;
       };
       
       resizer.addEventListener('mousedown', startDragging);
+      resizer.addEventListener('mouseup', clearHorizontalDragTimeout);
+      
+      // 添加双击重置功能 - 水平分割线重置到80%
+      resizer.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        
+        // 清除拖拽超时，防止双击时触发拖拽
+        if (horizontalDragTimeout) {
+          clearTimeout(horizontalDragTimeout);
+          horizontalDragTimeout = null;
+        }
+        
+        console.log('水平分割线双击事件触发');
+        this.resetHorizontalResizer();
+      });
     }
     
     // 垂直分割条（左右两栏）
@@ -1854,62 +1917,154 @@ class PaperReader {
     
     // 设置垂直分割条
     if (verticalResizer && pdfContainer && rightPanel) {
+      let dragStartTime = 0;
+      let isDragging = false;
+      let dragTimeout = null;
+      
       const startVerticalDragging = (e) => {
-      e.preventDefault();
-      verticalResizer.classList.add('dragging');
-      document.body.classList.add('resizing-vertical');
-      
-      const startX = e.clientX;
-      const containerWidth = pdfContainer.parentElement.offsetWidth;
-      const resizerWidth = verticalResizer.offsetWidth;
-      const minWidth = 200; // 最小宽度
-      const maxWidth = containerWidth - resizerWidth - minWidth; // 最大宽度
-      
-      // 获取当前PDF容器的宽度
-      const startPdfWidth = pdfContainer.offsetWidth;
-      
-      const doVerticalDrag = (e) => {
-        const deltaX = e.clientX - startX;
-        const newPdfWidth = Math.max(minWidth, Math.min(maxWidth, startPdfWidth + deltaX));
+        dragStartTime = Date.now();
         
-        // 设置PDF容器的宽度
-        pdfContainer.style.flex = 'none';
-        pdfContainer.style.width = newPdfWidth + 'px';
-        
-        // 右侧面板自动填充剩余空间
-        rightPanel.style.flex = '1';
-        
-        // 在拖动过程中实时重绘高亮选区
-        scheduleHighlightUpdate();
-        
-        // 更新缩放比例显示
-        scheduleZoomUpdate();
+        // 延迟150ms再开始拖拽，给双击事件留时间
+        dragTimeout = setTimeout(() => {
+          if (!isDragging) {
+            isDragging = true;
+            e.preventDefault();
+            verticalResizer.classList.add('dragging');
+            document.body.classList.add('resizing-vertical');
+            
+            const startX = e.clientX;
+            const containerWidth = pdfContainer.parentElement.offsetWidth;
+            const resizerWidth = verticalResizer.offsetWidth;
+            const minWidth = 200; // 最小宽度
+            const maxWidth = containerWidth - resizerWidth - minWidth; // 最大宽度
+            
+            // 获取当前PDF容器的宽度
+            const startPdfWidth = pdfContainer.offsetWidth;
+            
+            const doVerticalDrag = (e) => {
+              const deltaX = e.clientX - startX;
+              const newPdfWidth = Math.max(minWidth, Math.min(maxWidth, startPdfWidth + deltaX));
+              
+              // 设置PDF容器的宽度
+              pdfContainer.style.flex = 'none';
+              pdfContainer.style.width = newPdfWidth + 'px';
+              
+              // 右侧面板自动填充剩余空间
+              rightPanel.style.flex = '1';
+              
+              // 在拖动过程中实时重绘高亮选区
+              scheduleHighlightUpdate();
+              
+              // 更新缩放比例显示
+              scheduleZoomUpdate();
+            };
+            
+            const stopVerticalDragging = () => {
+              isDragging = false;
+              verticalResizer.classList.remove('dragging');
+              document.body.classList.remove('resizing-vertical');
+              document.removeEventListener('mousemove', doVerticalDrag);
+              document.removeEventListener('mouseup', stopVerticalDragging);
+              
+              // 拖动结束后最后重绘一次，确保位置精确
+              if (this.recalculateHighlights) {
+                setTimeout(() => {
+                  this.recalculateHighlights();
+                }, 50);
+              }
+              
+              // 拖动结束后更新缩放比例显示
+              setTimeout(() => {
+                this.updateCurrentZoomDisplay();
+              }, 100);
+            };
+            
+            document.addEventListener('mousemove', doVerticalDrag);
+            document.addEventListener('mouseup', stopVerticalDragging);
+          }
+        }, 150);
       };
       
-      const stopVerticalDragging = () => {
-        verticalResizer.classList.remove('dragging');
-        document.body.classList.remove('resizing-vertical');
-        document.removeEventListener('mousemove', doVerticalDrag);
-        document.removeEventListener('mouseup', stopVerticalDragging);
-        
-        // 拖动结束后最后重绘一次，确保位置精确
-        if (this.recalculateHighlights) {
-          setTimeout(() => {
-            this.recalculateHighlights();
-          }, 50);
+      // mouseup时清除拖拽超时
+      const clearDragTimeout = () => {
+        if (dragTimeout) {
+          clearTimeout(dragTimeout);
+          dragTimeout = null;
         }
-        
-        // 拖动结束后更新缩放比例显示
-        setTimeout(() => {
-          this.updateCurrentZoomDisplay();
-        }, 100);
+        isDragging = false;
       };
-      
-      document.addEventListener('mousemove', doVerticalDrag);
-      document.addEventListener('mouseup', stopVerticalDragging);
-    };
     
       verticalResizer.addEventListener('mousedown', startVerticalDragging);
+      verticalResizer.addEventListener('mouseup', clearDragTimeout);
+      
+      // 添加双击重置功能 - 垂直分割线重置到50%
+      verticalResizer.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // 清除拖拽超时，防止双击时触发拖拽
+        if (dragTimeout) {
+          clearTimeout(dragTimeout);
+          dragTimeout = null;
+        }
+        
+        console.log('垂直分割线双击事件触发');
+        this.resetVerticalResizer();
+      });
+    }
+  }
+
+  // 重置水平分割线到默认位置（80%）
+  resetHorizontalResizer() {
+    const fullSection = document.querySelector('.full-translation-section');
+    const selectionSection = document.querySelector('.selection-translation-section');
+    
+    if (fullSection && selectionSection) {
+      // 重置为flex布局的默认比例
+      fullSection.style.flex = '0.8'; // 80%
+      fullSection.style.height = 'auto';
+      selectionSection.style.flex = '0.2'; // 20%
+      
+      // 重新计算高亮选区
+      if (this.recalculateHighlights) {
+        setTimeout(() => {
+          this.recalculateHighlights();
+        }, 50);
+      }
+      
+      // 更新缩放比例显示
+      setTimeout(() => {
+        this.updateCurrentZoomDisplay();
+      }, 100);
+      
+      this.showMessage('分割线已重置到默认位置');
+    }
+  }
+
+  // 重置垂直分割线到默认位置（50%）
+  resetVerticalResizer() {
+    const pdfContainer = document.querySelector('.pdf-container');
+    const rightPanel = document.querySelector('.right-panel');
+    
+    if (pdfContainer && rightPanel) {
+      // 重置为flex布局的默认比例
+      pdfContainer.style.flex = '1'; // 50%
+      pdfContainer.style.width = 'auto';
+      rightPanel.style.flex = '1'; // 50%
+      
+      // 重新计算高亮选区
+      if (this.recalculateHighlights) {
+        setTimeout(() => {
+          this.recalculateHighlights();
+        }, 50);
+      }
+      
+      // 更新缩放比例显示
+      setTimeout(() => {
+        this.updateCurrentZoomDisplay();
+      }, 100);
+      
+      this.showMessage('分割线已重置到默认位置');
     }
   }
 
@@ -1956,7 +2111,109 @@ class PaperReader {
     }
   }
 
-  // 重新渲染当前页面（保持选择状态）
+  // 版本检测和更新内容清单
+  async checkVersionUpdate() {
+    try {
+      const { ipcRenderer } = require('electron');
+      const versionInfo = await ipcRenderer.invoke('check-version-update');
+      
+      if (versionInfo.isFirstRun) {
+        this.showWelcomeDialog(versionInfo);
+      } else if (versionInfo.isUpdate) {
+        this.showUpdateDialog(versionInfo);
+      }
+    } catch (error) {
+      console.error('版本检查失败:', error);
+    }
+  }
+
+  // 显示欢迎对话框（首次运行）
+  showWelcomeDialog(versionInfo) {
+    const modal = this.createUpdateModal({
+      title: '欢迎使用论文阅读助手',
+      version: versionInfo.currentVersion,
+      isFirstRun: true,
+      changelogMarkdown: versionInfo.changelogMarkdown
+    });
+    
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('show'), 10);
+  }
+
+  // 显示更新对话框
+  showUpdateDialog(versionInfo) {
+    const modal = this.createUpdateModal({
+      title: `应用已更新 v${versionInfo.currentVersion}`,
+      version: versionInfo.currentVersion,
+      previousVersion: versionInfo.previousVersion,
+      isFirstRun: false,
+      changelogMarkdown: versionInfo.changelogMarkdown
+    });
+    
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('show'), 10);
+  }
+
+  // 创建更新内容清单模态框
+  createUpdateModal({ title, version, previousVersion, isFirstRun, changelogMarkdown }) {
+    const modal = document.createElement('div');
+    modal.className = 'version-modal';
+    
+    // 使用 marked 库将 Markdown 转换为 HTML
+    let changelogHtml = '';
+    if (changelogMarkdown) {
+      try {
+        changelogHtml = marked.parse(changelogMarkdown);
+        
+        // 为当前版本添加特殊标记
+        if (version) {
+          const versionRegex = new RegExp(`<h2[^>]*>版本\\s+${version}`, 'g');
+          changelogHtml = changelogHtml.replace(versionRegex, 
+            `<h2 class="current-version">版本 ${version} <span class="current-badge">当前版本</span>`
+          );
+        }
+      } catch (error) {
+        console.error('解析 Markdown 失败:', error);
+        changelogHtml = '<p>无法加载更新记录</p>';
+      }
+    } else {
+      changelogHtml = '<p>无更新记录</p>';
+    }
+    
+    modal.innerHTML = `
+      <div class="version-modal-content">
+        <div class="version-modal-header">
+          <h3>${title}</h3>
+        </div>
+        <div class="version-modal-body">
+          <div class="changelog-container markdown-content">
+            ${changelogHtml}
+          </div>
+        </div>
+        <div class="version-modal-footer">
+          <button class="version-close-btn">${isFirstRun ? '开始使用' : '我知道了'}</button>
+        </div>
+      </div>
+    `;
+
+    // 添加关闭事件
+    const closeBtn = modal.querySelector('.version-close-btn');
+    closeBtn.addEventListener('click', () => {
+      modal.classList.remove('show');
+      setTimeout(() => {
+        document.body.removeChild(modal);
+      }, 300);
+    });
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeBtn.click();
+      }
+    });
+
+    return modal;
+  }
 }
 
 // 初始化应用

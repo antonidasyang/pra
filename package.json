@@ -1,6 +1,6 @@
 {
   "name": "paper-reading-assistant",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automatically read, translate, and extract key insights from research papers.",
   "main": "main.js",
   "scripts": {
