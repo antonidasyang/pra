@@ -30,6 +30,9 @@ class PaperReader {
     // 滚轮翻页防抖
     this.wheelTimeout = null;
     
+    // 缓存滚动翻页设置，避免每次滚动都读取
+    this.enableScrollPageTurn = true;
+    
     this.init();
   }
 
@@ -287,7 +290,8 @@ class PaperReader {
           const isAtTop = container.scrollTop <= 0;
           const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
           
-          if ((e.deltaY < 0 && isAtTop) || (e.deltaY > 0 && isAtBottom)) {
+          // 检查是否启用了滚动翻页功能
+          if (this.enableScrollPageTurn && ((e.deltaY < 0 && isAtTop) || (e.deltaY > 0 && isAtBottom))) {
             // 在顶部向上滚动或在底部向下滚动时，进行翻页
             e.preventDefault();
             if (e.deltaY > 0) {
@@ -304,27 +308,30 @@ class PaperReader {
           }
           // 其他情况下不阻止默认行为，让浏览器处理滚动
         } else {
-          // 没有滚动条时，直接翻页
-          e.preventDefault();
-          
-          // 添加防抖机制，避免过快翻页
-          if (this.wheelTimeout) {
-            return;
-          }
-          
-          this.wheelTimeout = setTimeout(() => {
-            this.wheelTimeout = null;
-          }, 150); // 150ms防抖间隔
-          
-          if (e.deltaY > 0) {
-            // 向下滚动，翻到下一页
-            if (this.currentPage < this.totalPages) {
-              this.showPDFPage(this.currentPage + 1);
+          // 没有滚动条时，检查是否启用滚动翻页功能
+          if (this.enableScrollPageTurn) {
+            // 直接翻页
+            e.preventDefault();
+            
+            // 添加防抖机制，避免过快翻页
+            if (this.wheelTimeout) {
+              return;
             }
-          } else {
-            // 向上滚动，翻到上一页
-            if (this.currentPage > 1) {
-              this.showPDFPage(this.currentPage - 1);
+            
+            this.wheelTimeout = setTimeout(() => {
+              this.wheelTimeout = null;
+            }, 150); // 150ms防抖间隔
+            
+            if (e.deltaY > 0) {
+              // 向下滚动，翻到下一页
+              if (this.currentPage < this.totalPages) {
+                this.showPDFPage(this.currentPage + 1);
+              }
+            } else {
+              // 向上滚动，翻到上一页
+              if (this.currentPage > 1) {
+                this.showPDFPage(this.currentPage - 1);
+              }
             }
           }
         }
@@ -852,6 +859,11 @@ class PaperReader {
     document.getElementById('llm-model').value = settings.llmModel || '';
     document.getElementById('llm-api-key').value = settings.llmApiKey || '';
     document.getElementById('interpretation-prompt').value = settings.interpretationPrompt || '';
+    document.getElementById('enable-scroll-page-turn').checked = settings.enableScrollPageTurn !== false; // 默认为true
+    
+    // 显示版本号
+    const packageJson = require('./package.json');
+    document.getElementById('settings-version').textContent = `v${packageJson.version}`;
     
     document.getElementById('settings-modal').style.display = 'flex';
   }
@@ -866,11 +878,15 @@ class PaperReader {
       llmUrl: document.getElementById('llm-url').value.trim(),
       llmModel: document.getElementById('llm-model').value.trim(),
       llmApiKey: document.getElementById('llm-api-key').value.trim(),
-      interpretationPrompt: document.getElementById('interpretation-prompt').value.trim()
+      interpretationPrompt: document.getElementById('interpretation-prompt').value.trim(),
+      enableScrollPageTurn: document.getElementById('enable-scroll-page-turn').checked
     };
     
     // 保存到localStorage
     localStorage.setItem('settings', JSON.stringify(settings));
+    
+    // 更新缓存的设置
+    this.enableScrollPageTurn = settings.enableScrollPageTurn;
     
     // 设置全局代理
     if (settings.proxyUrl) {
@@ -893,6 +909,7 @@ class PaperReader {
         this.llmModel = settings.llmModel || '';
         this.llmApiKey = settings.llmApiKey || '';
         this.interpretationPrompt = settings.interpretationPrompt || '';
+        this.enableScrollPageTurn = settings.enableScrollPageTurn !== false; // 缓存设置，默认为true
         
         // 加载时设置全局代理
         if (this.proxyUrl) {
@@ -921,7 +938,8 @@ class PaperReader {
 论文内容：
 {text}
 
-请用中文回答，格式要清晰易读。`
+请用中文回答，格式要清晰易读。`,
+      enableScrollPageTurn: true
     };
   }
 

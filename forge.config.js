@@ -1,55 +1,69 @@
-const { FusesPlugin } = require('@electron-forge/plugin-fuses');
-const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 const path = require('path');
 
 module.exports = {
   packagerConfig: {
-    asar: true,
-    icon: path.join(__dirname, 'assets', 'icon.ico'),
-    name: 'PaperReadingAssistant'
+    asar: true, // 启用ASAR打包，将源代码打包成单个归档文件
+    icon: path.join(__dirname, 'assets', 'icon'), // 不带扩展名，让Electron自动选择
+    name: 'Paper Reading Assistant', // 应用显示名称
+    executableName: 'paper-reading-assistant', // 可执行文件名称
+    // 排除不需要打包的文件，减小体积
+    ignore: [
+      /\.git/,
+      /node_modules\/\.cache/,
+      /\.vscode/,
+      /\.github/,
+      /README\.md/,
+      /\.gitignore/,
+      /forge\.config\.js/
+    ]
   },
-  rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        name: 'PaperReadingAssistant',
+        name: 'paper-reading-assistant',
+        setupIcon: path.join(__dirname, 'assets', 'icon.ico'),
         authors: 'Anton Yang',
-        description: '论文阅读助手'
-      },
+        description: 'Automatically read, translate, and extract key insights from research papers.',
+        // 优化安装速度的配置
+        noMsi: true,                    // 只生成exe，不生成msi，减少构建时间
+        remoteReleases: false,          // 不检查远程版本，加快安装速度
+        allowOfflineMode: true,         // 允许离线模式
+        deltaCompressionLevel: 6        // 降低压缩级别，平衡文件大小和速度
+      }
     },
     {
       name: '@electron-forge/maker-zip',
-      platforms: ['win32'],
-    },
-    {
-      name: '@electron-forge/maker-zip',
-      platforms: ['darwin'],
+      platforms: ['darwin', 'linux']
     },
     {
       name: '@electron-forge/maker-deb',
-      config: {},
+      config: {
+        options: {
+          icon: path.join(__dirname, 'assets', 'icon.png')
+        }
+      }
     },
     {
       name: '@electron-forge/maker-rpm',
-      config: {},
-    },
+      config: {
+        options: {
+          icon: path.join(__dirname, 'assets', 'icon.png')
+        }
+      }
+    }
   ],
-  plugins: [
+  publishers: [
     {
-      name: '@electron-forge/plugin-auto-unpack-natives',
-      config: {},
-    },
-    // Fuses are used to enable/disable various Electron functionality
-    // at package time, before code signing the application
-    new FusesPlugin({
-      version: FuseVersion.V1,
-      [FuseV1Options.RunAsNode]: false,
-      [FuseV1Options.EnableCookieEncryption]: true,
-      [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
-      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
-      [FuseV1Options.OnlyLoadAppFromAsar]: true,
-    }),
-  ],
-};
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'antonidasyang',
+          name: 'pra'
+        },
+        prerelease: false,
+        draft: true
+      }
+    }
+  ]
+}

@@ -103,7 +103,7 @@
     <div id="settings-modal" class="modal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>设置</h3>
+          <h3>设置 <span id="settings-version" class="version-info"></span></h3>
           <button class="close-btn" id="close-settings">×</button>
         </div>
         <div class="modal-body">
@@ -126,6 +126,12 @@
           <div class="setting-item">
             <label for="interpretation-prompt">解读提示词:</label>
             <textarea id="interpretation-prompt" rows="6" placeholder="请输入解读提示词模板，可以使用 {text} 作为论文内容的占位符"></textarea>
+          </div>
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" id="enable-scroll-page-turn" />
+              启用滚动翻页 (滚动到头部/底部时自动翻页)
+            </label>
           </div>
           <div class="setting-item">
             <button class="btn" id="save-settings">保存设置</button>

@@ -1,7 +1,27 @@
+// 首先处理 Squirrel 安装/卸载事件，必须在所有其他代码之前！
+if (require('electron-squirrel-startup')) {
+  const { app } = require('electron')
+  app.quit()
+  // 强制退出，不执行后续代码
+  process.exit(0)
+}
+
 const { app, BrowserWindow, ipcMain, session } = require('electron')
 const fs = require('fs')
 const path = require('path')
 require('@electron/remote/main').initialize()
+
+const { updateElectronApp, UpdateSourceType } = require('update-electron-app')
+
+// 配置自动更新
+updateElectronApp({
+  updateSource: {
+    type: UpdateSourceType.ElectronPublicUpdateService,
+    repo: 'antonidasyang/pra'
+  },
+  updateInterval: '5 minutes',
+  notifyUser: true // 禁用默认通知，使用自定义弹框
+})
 
 // 版本管理和更新清单
 const VERSION_STORAGE_FILE = path.join(app.getPath('userData'), 'app-version.json')
@@ -215,10 +235,13 @@ ipcMain.on('clear-global-proxy', (event) => {
 });
 
 const createWindow = () => {
+  // ASAR会自动处理路径映射，开发和生产环境使用同一路径即可
+  const iconPath = path.join(__dirname, 'assets', 'icon.ico');
+    
   const win = new BrowserWindow({
     width: 1600,
     height: 900,
-    icon: './assets/icon.ico',
+    icon: iconPath,
     show: false, // 先不显示窗口
     autoHideMenuBar: true, // 隐藏菜单栏
     webPreferences: {
