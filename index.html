@@ -19,7 +19,10 @@
       <div class="sidebar collapsed" id="sidebar">
         <div class="sidebar-header">
           <h3>大纲</h3>
-          <button class="btn" id="toggle-sidebar">☰</button>
+          <div class="sidebar-controls">
+            <button class="btn sidebar-btn" id="toggle-sidebar">☰</button>
+            <button class="btn sidebar-btn" id="refresh-outline" title="重新提取大纲">🔄</button>
+          </div>
         </div>
         <div class="sidebar-content">
           <div id="outline-content">
@@ -33,7 +36,7 @@
           <div class="center-controls">
             <div class="zoom-controls">
               <label>缩放:</label>
-              <input type="number" id="zoom-input" min="25" max="400" value="100" step="1" />
+              <input type="number" id="zoom-input" min="25" value="100" step="1" />
               <span>%</span>
               <button id="zoom-fit-width" class="active" title="适应宽度">↔</button>
               <button id="zoom-fit-page" title="适应页面">⤢</button>
@@ -120,6 +123,13 @@
             <input type="text" id="llm-model" placeholder="gpt-3.5-turbo" />
           </div>
           <div class="setting-item">
+            <label for="llm-context-length">模型上下文长度:</label>
+            <input type="number" id="llm-context-length" placeholder="8192" min="1024" max="32000" step="1024" />
+            <small style="color: #666; font-size: 11px; display: block; margin-top: 4px;">
+              输入模型支持的最大token数量（如：GPT-3.5为4096，GPT-4为8192，Claude-3为200000）
+            </small>
+          </div>
+          <div class="setting-item">
             <label for="llm-api-key">API密钥:</label>
             <input type="password" id="llm-api-key" placeholder="sk-..." />
           </div>
@@ -131,6 +141,12 @@
             <label>
               <input type="checkbox" id="enable-scroll-page-turn" />
               启用滚动翻页 (滚动到头部/底部时自动翻页)
+            </label>
+          </div>
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" id="enable-ai-outline" />
+              启用AI智能目录提取 (当PDF无内置目录时自动使用AI分析)
             </label>
           </div>
           <div class="setting-item">

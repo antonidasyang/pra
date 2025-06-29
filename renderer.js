@@ -77,7 +77,12 @@ class PaperReader {
           this.setScrollTop(this.lastScrollTop);
         }, 100);
         
+        // 提取大纲（会自动检查并使用保存的大纲）
         this.extractOutline();
+        
+        // 检查并加载上次的解读结果
+        this.loadSavedInterpretation();
+        
         this.showMessage('已恢复上次的阅读状态');
         this.updatePageInfo();
         this.updateZoomButtons();
@@ -148,6 +153,11 @@ class PaperReader {
       this.toggleSidebar();
     });
 
+    // 添加刷新大纲功能
+    document.getElementById('refresh-outline').addEventListener('click', () => {
+      this.refreshOutline();
+    });
+
     // 设置相关事件
     document.getElementById('settings-btn').addEventListener('click', () => {
       this.showSettings();
@@ -188,13 +198,12 @@ class PaperReader {
     document.getElementById('zoom-input').addEventListener('input', (e) => {
       let newZoom = parseInt(e.target.value);
       
-      // 如果PDF已加载，应用动态约束
-      if (this.currentPdf && this.fitPageScale && this.fitWidthScale) {
+      // 如果PDF已加载，应用动态约束（只限制下限，不限制上限）
+      if (this.currentPdf && this.fitPageScale) {
         const minZoom = Math.round(this.fitPageScale * 100);
-        const maxZoom = Math.round(this.fitWidthScale * 100);
         
-        // 限制缩放范围
-        newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+        // 只限制最小缩放范围，不限制最大缩放
+        newZoom = Math.max(minZoom, newZoom);
         
         // 如果值被限制，更新输入框显示
         if (newZoom !== parseInt(e.target.value)) {
@@ -265,10 +274,9 @@ class PaperReader {
         // 向上滚动放大，向下滚动缩小
         const zoomStep = 10; // 每次缩放10%
         if (e.deltaY < 0) {
-          // 向上滚动，放大
+          // 向上滚动，放大（取消上限限制）
           const newZoom = this.currentZoom + zoomStep;
-          const maxZoom = Math.round(fitWidthScale * 100);
-          this.currentZoom = Math.min(maxZoom, newZoom);
+          this.currentZoom = newZoom;
         } else {
           // 向下滚动，缩小
           const newZoom = this.currentZoom - zoomStep;
@@ -444,12 +452,11 @@ class PaperReader {
     // 更新输入框的值和约束
     zoomInput.value = this.currentZoom;
     
-    // 如果PDF已加载，动态更新输入框的min和max属性
-    if (this.currentPdf && this.fitPageScale && this.fitWidthScale) {
+    // 如果PDF已加载，动态更新输入框的min属性（不设置max限制）
+    if (this.currentPdf && this.fitPageScale) {
       const minZoom = Math.round(this.fitPageScale * 100);
-      const maxZoom = Math.round(this.fitWidthScale * 100);
       zoomInput.min = minZoom;
-      zoomInput.max = maxZoom;
+      zoomInput.removeAttribute('max'); // 移除最大值限制
     }
   }
 
@@ -507,6 +514,9 @@ class PaperReader {
         this.showMessage('PDF加载成功');
         this.updatePageInfo();
         
+        // 检查并加载上次的解读结果
+        this.loadSavedInterpretation();
+        
         // 保存应用状态
         this.saveAppState();
       }
@@ -556,8 +566,8 @@ class PaperReader {
           scale = this.fitWidthScale;
       }
       
-      // 限制缩放范围
-      scale = Math.max(0.25, Math.min(4.0, scale));
+      // 限制缩放范围（只限制下限，不限制上限）
+      scale = Math.max(0.25, scale);
       
       // 只在非自定义模式下更新当前缩放值
       if (this.zoomMode !== 'custom') {
@@ -584,6 +594,13 @@ class PaperReader {
         canvas.style.maxHeight = '100%';
         canvas.style.width = 'auto';
         canvas.style.height = 'auto';
+      } else if (this.zoomMode === 'custom' && scale > this.fitWidthScale) {
+        // 自定义模式且缩放比例大于适应宽度时，允许超出容器并居中显示
+        canvas.style.maxWidth = 'none';
+        canvas.style.width = 'auto';
+        canvas.style.height = 'auto';
+        canvas.style.display = 'block';
+        canvas.style.margin = '0 auto';
       } else {
         // 其他模式：保持原有逻辑
         canvas.style.maxWidth = '100%';
@@ -598,7 +615,29 @@ class PaperReader {
       await page.render(renderContext).promise;
       
       container.innerHTML = '';
-      container.appendChild(canvas);
+      
+      // 创建一个包装器来包含canvas和高亮框，确保高亮框能被正确剪裁
+      const canvasWrapper = document.createElement('div');
+      canvasWrapper.style.position = 'relative';
+      canvasWrapper.style.display = 'inline-block';
+      canvasWrapper.style.overflow = 'visible'; // canvas包装器不剪裁内容
+      
+      canvasWrapper.appendChild(canvas);
+      container.appendChild(canvasWrapper);
+      
+      // 根据canvas实际宽度调整容器样式
+      const containerDisplayWidth = container.clientWidth;
+      const canvasDisplayWidth = canvas.getBoundingClientRect().width;
+      
+      // 当canvas宽度超过容器可用宽度时，调整布局以确保内容完整显示
+      if (canvasDisplayWidth > containerDisplayWidth - 40) { // 40px是左右padding的总和
+        container.classList.add('high-zoom');
+        // 为canvas包装器添加左边距，保持视觉对齐
+        canvasWrapper.style.marginLeft = '20px';
+      } else {
+        container.classList.remove('high-zoom');
+        canvasWrapper.style.marginLeft = '';
+      }
       
       // 在页面渲染完成后立即进行段落拼接
       await this.processPageText(page, viewport);
@@ -610,6 +649,12 @@ class PaperReader {
       this.updatePageInfo();
       this.updateZoomButtons();
       this.updatePageArrows();
+      
+      // 翻页后将滚动条重置到顶部
+      container.scrollTop = 0;
+      
+      // 更新侧边栏中的目录高亮
+      this.updateOutlineHighlight(pageNumber);
       
       // 保存应用状态
       this.saveAppState();
@@ -857,9 +902,11 @@ class PaperReader {
     document.getElementById('proxy-url').value = settings.proxyUrl || '';
     document.getElementById('llm-url').value = settings.llmUrl || '';
     document.getElementById('llm-model').value = settings.llmModel || '';
+    document.getElementById('llm-context-length').value = settings.llmContextLength || 8192;
     document.getElementById('llm-api-key').value = settings.llmApiKey || '';
     document.getElementById('interpretation-prompt').value = settings.interpretationPrompt || '';
     document.getElementById('enable-scroll-page-turn').checked = settings.enableScrollPageTurn !== false; // 默认为true
+    document.getElementById('enable-ai-outline').checked = settings.enableAiOutline !== false; // 默认为true
     
     // 显示版本号
     const packageJson = require('./package.json');
@@ -877,9 +924,11 @@ class PaperReader {
       proxyUrl: document.getElementById('proxy-url').value.trim(),
       llmUrl: document.getElementById('llm-url').value.trim(),
       llmModel: document.getElementById('llm-model').value.trim(),
+      llmContextLength: parseInt(document.getElementById('llm-context-length').value) || 8192,
       llmApiKey: document.getElementById('llm-api-key').value.trim(),
       interpretationPrompt: document.getElementById('interpretation-prompt').value.trim(),
-      enableScrollPageTurn: document.getElementById('enable-scroll-page-turn').checked
+      enableScrollPageTurn: document.getElementById('enable-scroll-page-turn').checked,
+      enableAiOutline: document.getElementById('enable-ai-outline').checked
     };
     
     // 保存到localStorage
@@ -887,6 +936,7 @@ class PaperReader {
     
     // 更新缓存的设置
     this.enableScrollPageTurn = settings.enableScrollPageTurn;
+    this.enableAiOutline = settings.enableAiOutline;
     
     // 设置全局代理
     if (settings.proxyUrl) {
@@ -907,9 +957,11 @@ class PaperReader {
         this.proxyUrl = settings.proxyUrl || '';
         this.llmUrl = settings.llmUrl || '';
         this.llmModel = settings.llmModel || '';
+        this.llmContextLength = settings.llmContextLength || 8192;
         this.llmApiKey = settings.llmApiKey || '';
         this.interpretationPrompt = settings.interpretationPrompt || '';
         this.enableScrollPageTurn = settings.enableScrollPageTurn !== false; // 缓存设置，默认为true
+        this.enableAiOutline = settings.enableAiOutline !== false; // 缓存AI目录设置，默认为true
         
         // 加载时设置全局代理
         if (this.proxyUrl) {
@@ -927,6 +979,7 @@ class PaperReader {
       proxyUrl: '',
       llmUrl: 'https://api.openai.com/v1/chat/completions',
       llmModel: 'gpt-3.5-turbo',
+      llmContextLength: 8192,
       llmApiKey: '',
       interpretationPrompt: `请对以下学术论文内容进行专业解读，包括：
 1. 主要内容概述
@@ -939,7 +992,8 @@ class PaperReader {
 {text}
 
 请用中文回答，格式要清晰易读。`,
-      enableScrollPageTurn: true
+      enableScrollPageTurn: true,
+      enableAiOutline: true
     };
   }
 
@@ -1027,10 +1081,237 @@ class PaperReader {
 
   async extractOutline() {
     try {
-      const outline = await this.currentPdf.getOutline();
-      this.displayOutline(outline);
+      // 首先检查是否有保存的大纲
+      const savedOutline = this.loadSavedOutline();
+      if (savedOutline && savedOutline.data) {
+        console.log('使用保存的大纲结果');
+        
+        // 显示保存的大纲，并添加时间提示
+        if (savedOutline.isAiGenerated) {
+          // 如果是AI生成的大纲，使用AI大纲显示方式
+          this.displayLLMOutlineWithIndicator(savedOutline.data, savedOutline.timestamp);
+        } else {
+          // 如果是PDF内置大纲，使用普通大纲显示方式
+          this.displayOutlineWithIndicator(savedOutline.data, savedOutline.timestamp);
+        }
+        return;
+      }
+
+      // 没有保存的大纲，尝试获取PDF自带的大纲
+      const pdfOutline = await this.currentPdf.getOutline();
+      if (pdfOutline && pdfOutline.length > 0) {
+        this.displayOutline(pdfOutline);
+        // 保存PDF内置大纲
+        this.saveOutline(pdfOutline, false);
+        return;
+      }
+
+      // 如果PDF没有大纲，根据设置决定是否使用大模型提取目录
+      if (this.enableAiOutline) {
+        await this.extractOutlineWithLLM();
+      } else {
+        this.displayOutline([]);
+      }
     } catch (error) {
+      console.error('提取大纲失败:', error);
       this.displayOutline([]);
+    }
+  }
+
+  // 刷新大纲（手动重新提取）
+  async refreshOutline() {
+    if (!this.currentPdf) {
+      this.showError('请先加载PDF文件');
+      return;
+    }
+
+    try {
+      const container = document.getElementById('outline-content');
+      
+      // 显示加载状态
+      container.innerHTML = `
+        <div class="loading">
+          <div class="loading-dots">
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
+          <div style="margin-top: 10px; font-size: 12px;">正在重新提取大纲...</div>
+        </div>
+      `;
+
+      // 检查设置
+      const settings = this.loadSettings();
+      if (!settings.enableAiOutline) {
+        // 如果没有启用AI大纲，只显示PDF自带大纲
+        const pdfOutline = await this.currentPdf.getOutline();
+        if (pdfOutline && pdfOutline.length > 0) {
+          this.displayOutline(pdfOutline);
+        } else {
+          container.innerHTML = '<div class="loading">该PDF没有内置大纲，请在设置中启用AI智能目录提取</div>';
+        }
+        return;
+      }
+
+      // 检查大模型配置
+      const { llmUrl, llmModel, llmApiKey } = settings;
+      if (!llmUrl || !llmModel || !llmApiKey) {
+        container.innerHTML = '<div class="loading">请先在设置中配置大模型信息</div>';
+        return;
+      }
+
+      // 强制使用AI重新提取大纲
+      await this.extractOutlineWithLLM();
+      
+      // 提示用户大纲已更新
+      setTimeout(() => {
+        const container = document.getElementById('outline-content');
+        if (container && !container.innerHTML.includes('刷新大纲失败')) {
+          // 如果解析成功，显示更新提示
+          const existingIndicator = container.querySelector('div[style*="background: #e3f2fd"]');
+          if (existingIndicator) {
+            existingIndicator.style.background = '#e8f5e8';
+            existingIndicator.style.borderColor = '#c3e6c3';
+            existingIndicator.querySelector('span').innerHTML = '🔄 大纲已更新 (AI重新生成)';
+            existingIndicator.querySelector('span').style.color = '#155724';
+            
+            // 3秒后恢复原样
+            setTimeout(() => {
+              existingIndicator.style.background = '#e3f2fd';
+              existingIndicator.style.borderColor = '#90caf9';
+              existingIndicator.querySelector('span').innerHTML = '🤖 使用保存的大纲 (AI生成)';
+              existingIndicator.querySelector('span').style.color = '#1565c0';
+            }, 3000);
+          }
+        }
+      }, 500);
+      
+    } catch (error) {
+      console.error('刷新大纲失败:', error);
+      const container = document.getElementById('outline-content');
+      container.innerHTML = `<div class="loading">刷新大纲失败: ${error.message}</div>`;
+    }
+  }
+
+  async extractOutlineWithLLM() {
+    const container = document.getElementById('outline-content');
+    
+    // 显示加载状态
+    container.innerHTML = `
+      <div class="loading">
+        <div class="loading-dots">
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+        <div style="margin-top: 10px; font-size: 12px;">正在使用AI分析整篇论文提取目录...</div>
+      </div>
+    `;
+
+    try {
+      // 获取设置
+      const settings = this.loadSettings();
+      const { llmUrl, llmModel, llmApiKey } = settings;
+      
+      if (!llmUrl || !llmModel || !llmApiKey) {
+        container.innerHTML = '<div class="loading">请先在设置中配置大模型信息</div>';
+        return;
+      }
+
+      // 提取全篇文本内容用于分析
+      let combinedText = '';
+      
+      // 使用已有的提取全篇文本方法
+      try {
+        combinedText = await this.extractFullPaperText();
+      } catch (error) {
+        console.error('提取全篇文本失败，改用前5页:', error);
+        // 如果提取全篇失败，回退到前5页
+        const maxPagesToAnalyze = Math.min(5, this.totalPages);
+        for (let pageNum = 1; pageNum <= maxPagesToAnalyze; pageNum++) {
+          const page = await this.currentPdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          
+          // 拼接页面文本
+          let pageText = `--- 第${pageNum}页 ---\n`;
+          textContent.items.forEach(item => {
+            if (item.str.trim()) {
+              pageText += item.str + ' ';
+            }
+          });
+          combinedText += pageText + '\n\n';
+        }
+      }
+
+      if (!combinedText.trim()) {
+        container.innerHTML = '<div class="loading">文档中没有找到可分析的文本内容</div>';
+        return;
+      }
+
+      // 构建提示词
+      const prompt = `请分析以下完整论文内容，提取出论文的目录结构。要求：
+1. 识别论文的章节和小节标题结构
+2. 准确判断每个标题对应的页码
+3. 返回JSON格式的目录结构
+4. 每个目录项包含：title（标题）、page（页码）、level（层级，1为一级标题，2为二级标题，以此类推）
+5. 请注意文档中的页码标记"=== 第X页 ==="来准确定位标题位置
+6. 只返回JSON数组，不要其他解释
+
+完整论文内容：
+${combinedText}
+
+请返回格式如下的JSON数组：
+[
+  {"title": "摘要", "page": 1, "level": 1},
+  {"title": "1. 引言", "page": 2, "level": 1},
+  {"title": "1.1 研究背景", "page": 2, "level": 2},
+  {"title": "1.2 研究目标", "page": 3, "level": 2},
+  {"title": "2. 相关工作", "page": 4, "level": 1},
+  {"title": "3. 方法", "page": 6, "level": 1},
+  {"title": "3.1 算法设计", "page": 6, "level": 2},
+  {"title": "4. 实验结果", "page": 10, "level": 1},
+  {"title": "5. 结论", "page": 15, "level": 1}
+]`;
+
+      // 调用大模型API
+      const response = await this.callLLMAPI(prompt, llmUrl, llmModel, llmApiKey);
+      
+      if (response) {
+        try {
+          // 尝试解析JSON响应
+          let outlineData;
+          
+          // 清理响应文本，提取JSON部分
+          let cleanResponse = response.trim();
+          
+          // 尝试找到JSON数组的开始和结束
+          const jsonStart = cleanResponse.indexOf('[');
+          const jsonEnd = cleanResponse.lastIndexOf(']');
+          
+          if (jsonStart !== -1 && jsonEnd !== -1) {
+            cleanResponse = cleanResponse.substring(jsonStart, jsonEnd + 1);
+          }
+          
+          outlineData = JSON.parse(cleanResponse);
+          
+          if (Array.isArray(outlineData) && outlineData.length > 0) {
+            this.displayLLMOutline(outlineData);
+            // 保存AI生成的大纲
+            this.saveOutline(outlineData, true);
+          } else {
+            container.innerHTML = '<div class="loading">AI未能识别出文档目录结构</div>';
+          }
+        } catch (parseError) {
+          console.error('解析AI响应失败:', parseError);
+          console.log('AI原始响应:', response);
+          container.innerHTML = '<div class="loading">AI响应格式解析失败，请检查模型配置</div>';
+        }
+      } else {
+        container.innerHTML = '<div class="loading">AI分析失败，请检查网络连接和模型配置</div>';
+      }
+    } catch (error) {
+      console.error('AI提取目录失败:', error);
+      container.innerHTML = `<div class="loading">AI提取失败: ${error.message}</div>`;
     }
   }
 
@@ -1065,7 +1346,253 @@ class PaperReader {
     });
   }
 
-  getPageNumberFromDest(dest) {
+  // 显示带时间提示的普通大纲
+  displayOutlineWithIndicator(outline, timestamp) {
+    const container = document.getElementById('outline-content');
+    
+    if (!outline || outline.length === 0) {
+      container.innerHTML = '<div class="loading">该PDF没有大纲信息</div>';
+      return;
+    }
+
+    // 添加时间提示
+    const timeIndicator = `
+      <div style="background: #e8f5e8; border: 1px solid #c3e6c3; border-radius: 6px; padding: 8px; margin-bottom: 12px; font-size: 11px;">
+        <div style="color: #155724; display: flex; align-items: center; justify-content: space-between;">
+          <span>💾 使用保存的大纲 (PDF内置)</span>
+          <button id="refresh-outline-inline" style="background: #28a745; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">🔄</button>
+        </div>
+        <div style="color: #155724; margin-top: 4px;">
+          保存时间: ${new Date(timestamp).toLocaleString()}
+        </div>
+      </div>
+    `;
+
+    const outlineHtml = outline.map(item => {
+      const pageNumber = this.getPageNumberFromDest(item.dest);
+      return `
+        <div class="outline-item" data-page="${pageNumber}">
+          <div class="title">${item.title}</div>
+          <div class="page">第 ${pageNumber} 页</div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = timeIndicator + outlineHtml;
+
+    // 添加内联刷新按钮事件
+    const inlineRefreshBtn = document.getElementById('refresh-outline-inline');
+    if (inlineRefreshBtn) {
+      inlineRefreshBtn.addEventListener('click', () => {
+        this.refreshOutline();
+      });
+    }
+
+    // 添加大纲项点击事件
+    container.querySelectorAll('.outline-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const pageNumber = parseInt(item.dataset.page);
+        if (pageNumber && pageNumber > 0) {
+          this.showPDFPage(pageNumber);
+        }
+      });
+    });
+  }
+
+  // 显示带时间提示的AI大纲
+  displayLLMOutlineWithIndicator(outlineData, timestamp) {
+    const container = document.getElementById('outline-content');
+    
+    if (!outlineData || outlineData.length === 0) {
+      container.innerHTML = '<div class="loading">AI未能提取到目录信息</div>';
+      return;
+    }
+
+    // 添加时间提示
+    const timeIndicator = `
+      <div style="background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px; padding: 8px; margin-bottom: 12px; font-size: 11px;">
+        <div style="color: #1565c0; display: flex; align-items: center; justify-content: space-between;">
+          <span>🤖 使用保存的大纲 (AI生成)</span>
+          <button id="refresh-outline-inline" style="background: #1976d2; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">🔄</button>
+        </div>
+        <div style="color: #1565c0; margin-top: 4px;">
+          保存时间: ${new Date(timestamp).toLocaleString()}
+        </div>
+      </div>
+    `;
+
+    // 构建树形结构HTML
+    let outlineHtml = '<div class="llm-outline-tree">';
+    
+    outlineData.forEach((item, index) => {
+      const level = item.level || 1;
+      const title = item.title || '未知标题';
+      const page = item.page || 1;
+      
+      // 确保页码在有效范围内
+      const validPage = Math.max(1, Math.min(page, this.totalPages));
+      
+      outlineHtml += `
+        <div class="outline-item llm-outline-item level-${level}" data-page="${validPage}">
+          <div class="outline-content">
+            <div class="outline-icon">
+              ${level === 1 ? '📁' : level === 2 ? '📄' : '▪'}
+            </div>
+            <div class="outline-text">
+              <div class="title">${title}</div>
+              <div class="page">第 ${validPage} 页</div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    
+    outlineHtml += '</div>';
+    container.innerHTML = timeIndicator + outlineHtml;
+
+    // 添加内联刷新按钮事件
+    const inlineRefreshBtn = document.getElementById('refresh-outline-inline');
+    if (inlineRefreshBtn) {
+      inlineRefreshBtn.addEventListener('click', () => {
+        this.refreshOutline();
+      });
+    }
+
+    // 添加点击事件
+    container.querySelectorAll('.llm-outline-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        
+        // 高亮当前选中项
+        container.querySelectorAll('.llm-outline-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        
+        // 跳转到对应页面
+        const pageNumber = parseInt(item.dataset.page);
+        if (pageNumber && pageNumber > 0 && pageNumber <= this.totalPages) {
+          this.showPDFPage(pageNumber);
+        }
+      });
+      
+      // 添加悬停效果
+      item.addEventListener('mouseenter', () => {
+        item.style.backgroundColor = '#e8f4fd';
+      });
+      
+      item.addEventListener('mouseleave', () => {
+        if (!item.classList.contains('active')) {
+          item.style.backgroundColor = '';
+        }
+      });
+    });
+  }
+
+  displayLLMOutline(outlineData) {
+    const container = document.getElementById('outline-content');
+    
+    if (!outlineData || outlineData.length === 0) {
+      container.innerHTML = '<div class="loading">AI未能提取到目录信息</div>';
+      return;
+    }
+
+    // 构建树形结构HTML
+    let outlineHtml = '<div class="llm-outline-tree">';
+    
+    outlineData.forEach((item, index) => {
+      const level = item.level || 1;
+      const title = item.title || '未知标题';
+      const page = item.page || 1;
+      
+      // 确保页码在有效范围内
+      const validPage = Math.max(1, Math.min(page, this.totalPages));
+      
+      outlineHtml += `
+        <div class="outline-item llm-outline-item level-${level}" data-page="${validPage}">
+          <div class="outline-content">
+            <div class="outline-icon">
+              ${level === 1 ? '📁' : level === 2 ? '📄' : '▪'}
+            </div>
+            <div class="outline-text">
+              <div class="title">${title}</div>
+              <div class="page">第 ${validPage} 页</div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    
+    outlineHtml += '</div>';
+    container.innerHTML = outlineHtml;
+
+    // 添加点击事件
+    container.querySelectorAll('.llm-outline-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        
+        // 高亮当前选中项
+        container.querySelectorAll('.llm-outline-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        
+        // 跳转到对应页面
+        const pageNumber = parseInt(item.dataset.page);
+        if (pageNumber && pageNumber > 0 && pageNumber <= this.totalPages) {
+          this.showPDFPage(pageNumber);
+        }
+      });
+      
+      // 添加悬停效果
+      item.addEventListener('mouseenter', () => {
+        item.style.backgroundColor = '#e8f4fd';
+      });
+      
+      item.addEventListener('mouseleave', () => {
+        if (!item.classList.contains('active')) {
+          item.style.backgroundColor = '';
+        }
+      });
+         });
+   }
+
+   updateOutlineHighlight(currentPage) {
+     // 清除所有目录项的高亮
+     const outlineItems = document.querySelectorAll('.llm-outline-item, .outline-item');
+     outlineItems.forEach(item => {
+       item.classList.remove('active');
+       item.style.backgroundColor = '';
+     });
+
+     // 找到与当前页面最匹配的目录项并高亮
+     let bestMatch = null;
+     let bestMatchPage = 0;
+
+     outlineItems.forEach(item => {
+       const itemPage = parseInt(item.dataset.page);
+       if (itemPage <= currentPage && itemPage > bestMatchPage) {
+         bestMatch = item;
+         bestMatchPage = itemPage;
+       }
+     });
+
+     if (bestMatch) {
+       bestMatch.classList.add('active');
+       if (bestMatch.classList.contains('llm-outline-item')) {
+         bestMatch.style.backgroundColor = '#3498db';
+       }
+
+       // 滚动到可见区域
+       const sidebarContent = document.querySelector('.sidebar-content');
+       if (sidebarContent) {
+         const itemRect = bestMatch.getBoundingClientRect();
+         const containerRect = sidebarContent.getBoundingClientRect();
+         
+         if (itemRect.top < containerRect.top || itemRect.bottom > containerRect.bottom) {
+           bestMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+         }
+       }
+     }
+   }
+ 
+   getPageNumberFromDest(dest) {
     if (dest && dest.ref) {
       const pageRef = this.currentPdf.getPageIndex(dest.ref);
       if (pageRef !== -1) {
@@ -1198,16 +1725,13 @@ class PaperReader {
       overlay.style.border = `1px solid ${color.replace('0.3', '0.5')}`;
       overlay.style.borderRadius = '2px';
       overlay.style.pointerEvents = 'none';
-      overlay.style.zIndex = '5';
+      overlay.style.zIndex = '1'; // 降低z-index，确保不会覆盖页面内容
       
       // 获取canvas的实际显示尺寸和位置
       const canvasRect = canvas.getBoundingClientRect();
       const containerRect = canvas.parentElement.getBoundingClientRect();
       
-      // 获取容器的滚动偏移量
-      const container = canvas.parentElement;
-      const scrollLeft = container.scrollLeft || 0;
-      const scrollTop = container.scrollTop || 0;
+      // 不需要获取滚动偏移量，因为高亮框会直接定位在canvas上
       
       // 计算实际缩放比例
       const scaleX = canvasRect.width / canvas.width;
@@ -1224,10 +1748,10 @@ class PaperReader {
       // 需要将PDF的Y坐标转换为Canvas的Y坐标
       const canvasY = canvasRect.height - itemY - itemHeight;
       
-      // 计算相对于容器的位置，并减去滚动偏移量
-      // 因为高亮框是相对于容器定位的，而容器有滚动，所以需要减去滚动偏移量
-      const relativeX = itemX + canvas.offsetLeft - scrollLeft;
-      const relativeY = canvasY + canvas.offsetTop - scrollTop;
+      // 计算相对于canvas的位置
+      // 高亮框直接定位在canvas上，这样会随着canvas一起被容器的overflow剪裁
+      const relativeX = itemX;
+      const relativeY = canvasY;
       
       // 添加调试信息
       console.log('高亮框位置调试:', {
@@ -1238,7 +1762,6 @@ class PaperReader {
         canvasY,
         canvasOffset: { left: canvas.offsetLeft, top: canvas.offsetTop },
         containerRect: { left: containerRect.left, top: containerRect.top, width: containerRect.width, height: containerRect.height },
-        scrollOffset: { left: scrollLeft, top: scrollTop },
         relativeX, relativeY
       });
       
@@ -1262,6 +1785,7 @@ class PaperReader {
       selectedItems.forEach(item => {
         const highlight = createTextHighlight(item);
         highlight.classList.add('text-selection-overlay');
+        // 将高亮框添加到canvas的包装器中，而不是PDF容器中
         canvas.parentElement.appendChild(highlight);
         selectionOverlays.push(highlight);
       });
@@ -1347,6 +1871,7 @@ class PaperReader {
           selectedItems.forEach(item => {
             const highlight = createTextHighlight(item, 'rgba(0, 123, 255, 0.3)');
             highlight.classList.add('text-selection-overlay');
+            // 将高亮框添加到canvas的包装器中
             canvas.parentElement.appendChild(highlight);
             selectionOverlays.push(highlight);
           });
@@ -1370,6 +1895,7 @@ class PaperReader {
           selectedItems.forEach(item => {
             const highlight = createTextHighlight(item);
             highlight.classList.add('text-selection-overlay');
+            // 将高亮框添加到canvas的包装器中
             canvas.parentElement.appendChild(highlight);
             selectionOverlays.push(highlight);
           });
@@ -1462,7 +1988,8 @@ class PaperReader {
             selectedItems.forEach(item => {
               const highlight = createTextHighlight(item);
               highlight.classList.add('text-selection-overlay');
-              container.appendChild(highlight);
+              // 将高亮框添加到canvas的包装器中
+              canvas.parentElement.appendChild(highlight);
               selectionOverlays.push(highlight);
             });
           }
@@ -1540,34 +2067,14 @@ class PaperReader {
     }
   }
 
-  // 解读当前页面
+  // 解读整篇论文
   async interpretCurrentPage() {
-    if (!this.currentPdf || !this.currentPage) {
+    if (!this.currentPdf) {
       this.showError('请先加载PDF文件');
       return;
     }
 
     try {
-      const page = await this.currentPdf.getPage(this.currentPage);
-      const viewport = page.getViewport({ scale: 1.0 });
-      
-      // 获取页面文本内容
-      const textContent = await page.getTextContent();
-      let fullText = '';
-      
-      // 拼接所有文本
-      textContent.items.forEach(item => {
-        fullText += item.str + ' ';
-      });
-      
-      // 清理文本
-      fullText = fullText.replace(/\s+/g, ' ').trim();
-      
-      if (!fullText) {
-        this.showError('当前页面没有可解读的文本内容');
-        return;
-      }
-
       // 显示加载状态
       const interpretationContent = document.getElementById('interpretation-content');
       interpretationContent.innerHTML = `
@@ -1577,28 +2084,404 @@ class PaperReader {
             <div></div>
             <div></div>
           </div>
-          <div style="margin-top: 10px; color: #6c757d;">正在解读论文内容...</div>
+          <div style="margin-top: 10px; color: #6c757d;">正在提取整篇论文内容...</div>
         </div>
       `;
 
       // 获取设置
       const settings = this.loadSettings();
-      const { llmUrl, llmModel, llmApiKey, interpretationPrompt } = settings;
+      const { llmUrl, llmModel, llmApiKey, llmContextLength, interpretationPrompt } = settings;
       
       if (!llmUrl || !llmModel || !llmApiKey) {
         this.showError('请先在设置中配置大模型信息');
         return;
       }
 
-      // 构建提示词，替换占位符
-      const prompt = interpretationPrompt.replace('{text}', fullText);
+      // 提取整篇论文文本
+      const fullPaperText = await this.extractFullPaperText();
+      
+      if (!fullPaperText || fullPaperText.length < 100) {
+        this.showError('论文内容过少或无法提取文本内容');
+        return;
+      }
 
-      // 调用大模型API进行流式解读
-      await this.callLLMAPIStream(prompt, llmUrl, llmModel, llmApiKey, interpretationContent);
+      // 更新加载状态
+      interpretationContent.innerHTML = `
+        <div class="skeleton-placeholder">
+          <div class="loading-dots">
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
+          <div style="margin-top: 10px; color: #6c757d;">正在智能分段解读论文...</div>
+        </div>
+      `;
+
+      // 根据上下文长度分段并解读
+      await this.interpretPaperInChunks(fullPaperText, llmUrl, llmModel, llmApiKey, llmContextLength, interpretationPrompt, interpretationContent);
       
     } catch (error) {
       console.error('解读错误:', error);
       this.showError('解读失败: ' + error.message);
+    }
+  }
+
+  // 提取整篇论文文本
+  async extractFullPaperText() {
+    const totalPages = this.currentPdf.numPages;
+    let fullText = '';
+    
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      try {
+        const page = await this.currentPdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        
+        let pageText = '';
+        textContent.items.forEach(item => {
+          pageText += item.str + ' ';
+        });
+        
+        // 清理页面文本
+        pageText = pageText.replace(/\s+/g, ' ').trim();
+        
+        if (pageText) {
+          fullText += `\n\n=== 第${pageNum}页 ===\n${pageText}`;
+        }
+      } catch (error) {
+        console.warn(`提取第${pageNum}页文本失败:`, error);
+      }
+    }
+    
+    return fullText.trim();
+  }
+
+  // 分段解读论文
+  async interpretPaperInChunks(fullText, llmUrl, llmModel, llmApiKey, contextLength, interpretationPrompt, contentElement) {
+    // 估算token数量（粗略计算：中文约2.5字符/token，英文约4字符/token）
+    const estimateTokens = (text) => {
+      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+      const otherChars = text.length - chineseChars;
+      return Math.ceil(chineseChars / 2.5 + otherChars / 4);
+    };
+
+    const totalTokens = estimateTokens(fullText);
+    
+    // 预留token空间给提示词和响应（约占30%）
+    const availableTokens = Math.floor(contextLength * 0.7);
+    
+    // 如果文本够短，直接整篇解读
+    if (totalTokens <= availableTokens) {
+      await this.interpretSingleChunk(fullText, llmUrl, llmModel, llmApiKey, interpretationPrompt, contentElement, '整篇论文');
+      return;
+    }
+
+    // 需要分段处理
+    const chunks = this.splitTextIntoChunks(fullText, availableTokens);
+    
+    // 计算每段摘要的最大token数（总可用token数除以分段数，再预留一些空间）
+    const maxSummaryTokensPerChunk = Math.floor(availableTokens / chunks.length * 0.8);
+    
+    // 初始化布局显示
+    contentElement.innerHTML = `
+      <div style="padding: 20px; line-height: 1.6; font-size: 14px; color: #333;">
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="margin: 0 0 10px 0; color: #2c3e50;">📄 整篇论文智能解读</h3>
+          <p style="margin: 0; color: #6c757d;">
+            论文总长度: ${totalTokens.toLocaleString()} tokens | 
+            分段数量: ${chunks.length} 段 | 
+            上下文长度: ${contextLength.toLocaleString()} tokens
+          </p>
+          <p style="margin: 10px 0 0 0; color: #6c757d; font-size: 12px;">
+            正在采用两阶段解读：先生成各段摘要，再进行整体分析
+          </p>
+        </div>
+        
+        <!-- 整篇论文综合解读放在上面 -->
+        <div id="final-result" style="display: none; margin-bottom: 30px;"></div>
+        
+        <!-- 进度条和分段信息放在下面 -->
+        <div class="process-info-section">
+          <div style="background: #f8f9fa; padding: 12px 15px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #3498db;">
+            <h4 style="margin: 0 0 5px 0; color: #2c3e50; font-size: 14px;">📊 处理进度</h4>
+            <p style="margin: 0; color: #6c757d; font-size: 12px;">两阶段解读流程：摘要生成 → 整体分析</p>
+          </div>
+          <div class="progress-container">
+            <div class="progress-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span id="progress-text" style="font-size: 13px; color: #495057;">第一阶段：生成分段摘要</span>
+              <span id="progress-percent" style="font-size: 13px; color: #6c757d;">0%</span>
+            </div>
+            <div class="progress-bar" style="width: 100%; height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden;">
+              <div id="progress-fill" style="height: 100%; background: linear-gradient(90deg, #3498db, #2980b9); width: 0%; transition: width 0.3s ease;"></div>
+            </div>
+            <div id="progress-detail" style="margin-top: 8px; font-size: 12px; color: #6c757d;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    try {
+      // 第一阶段：生成各段摘要
+      const summaries = [];
+      const progressFill = document.getElementById('progress-fill');
+      const progressPercent = document.getElementById('progress-percent');
+      const progressDetail = document.getElementById('progress-detail');
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkTitle = `第${i + 1}段`;
+        progressDetail.textContent = `正在生成${chunkTitle}摘要...`;
+        
+        try {
+          const summary = await this.generateChunkSummary(chunks[i], llmUrl, llmModel, llmApiKey, maxSummaryTokensPerChunk);
+          summaries.push(summary);
+          
+          // 更新进度
+          const progress = Math.round(((i + 1) / chunks.length) * 50); // 第一阶段占50%
+          progressFill.style.width = progress + '%';
+          progressPercent.textContent = progress + '%';
+          
+        } catch (error) {
+          console.error(`生成第${i + 1}段摘要失败:`, error);
+          summaries.push(`第${i + 1}段摘要生成失败: ${error.message}`);
+        }
+        
+        // 添加小延迟避免请求过频
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      // 第二阶段：整体解读
+      document.getElementById('progress-text').textContent = '第二阶段：整体分析解读';
+      progressDetail.textContent = '正在基于摘要进行整体分析...';
+      progressFill.style.width = '60%';
+      progressPercent.textContent = '60%';
+      
+      // 拼接所有摘要
+      const combinedSummary = summaries.map((summary, index) => 
+        `=== 第${index + 1}段摘要 ===\n${summary}`
+      ).join('\n\n');
+      
+      // 构建最终解读提示词
+      const finalPrompt = `基于以下分段摘要，请对整篇论文进行全面的专业解读：
+
+${interpretationPrompt.replace('{text}', combinedSummary)}
+
+注意：以上内容是对原论文各部分的摘要，请基于这些摘要进行整体性的分析和解读，重点关注论文的整体结构、逻辑关系和核心贡献。`;
+
+      // 最终解读
+      const finalResultContainer = document.getElementById('final-result');
+      finalResultContainer.style.display = 'block';
+      finalResultContainer.innerHTML = `
+        <div style="background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+          <div style="background: #f8f9fa; padding: 12px; border-bottom: 1px solid #ddd;">
+            <h4 style="margin: 0; color: #495057;">📋 整篇论文综合解读</h4>
+          </div>
+          <div class="final-content" style="padding: 20px;">
+            <div class="skeleton-placeholder">
+              <div class="loading-dots">
+                <div></div>
+                <div></div>
+                <div></div>
+              </div>
+              <div style="margin-top: 10px; color: #6c757d;">正在进行整体解读分析...</div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      const finalContent = finalResultContainer.querySelector('.final-content');
+      
+      // 更新进度到90%
+      progressFill.style.width = '90%';
+      progressPercent.textContent = '90%';
+      
+             await this.callLLMAPIStream(finalPrompt, llmUrl, llmModel, llmApiKey, finalContent);
+       
+       // 完成进度
+       progressFill.style.width = '100%';
+       progressPercent.textContent = '100%';
+       progressDetail.textContent = '解读完成！';
+       document.getElementById('progress-text').textContent = '✅ 解读完成';
+       
+       // 保存解读结果
+       setTimeout(() => {
+         try {
+           const fullContent = contentElement.innerHTML;
+           this.saveInterpretation(fullContent);
+         } catch (error) {
+           console.error('保存解读结果失败:', error);
+         }
+       }, 1000);
+       
+       // 3秒后隐藏进度信息区域
+       setTimeout(() => {
+         const processInfoSection = document.querySelector('.process-info-section');
+         if (processInfoSection) {
+           processInfoSection.style.opacity = '0.5';
+           processInfoSection.style.transition = 'opacity 0.5s ease';
+           processInfoSection.style.pointerEvents = 'none';
+         }
+       }, 3000);
+      
+    } catch (error) {
+      console.error('分段解读过程中出错:', error);
+      contentElement.innerHTML = `
+        <div style="padding: 20px; color: #e74c3c;">
+          解读过程中出错: ${error.message}
+        </div>
+      `;
+    }
+  }
+
+  // 分割文本为合适的段落
+  splitTextIntoChunks(text, maxTokens) {
+    const estimateTokens = (text) => {
+      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+      const otherChars = text.length - chineseChars;
+      return Math.ceil(chineseChars / 2.5 + otherChars / 4);
+    };
+
+    const chunks = [];
+    const pages = text.split(/\n\n=== 第\d+页 ===\n/);
+    
+    let currentChunk = '';
+    let currentTokens = 0;
+    
+    for (let i = 0; i < pages.length; i++) {
+      if (i === 0 && !pages[i].trim()) continue; // 跳过空的第一个元素
+      
+      const pageText = pages[i].trim();
+      if (!pageText) continue;
+      
+      const pageTokens = estimateTokens(pageText);
+      
+      // 如果单页就超过限制，强制分割
+      if (pageTokens > maxTokens) {
+        // 先保存当前块
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = '';
+          currentTokens = 0;
+        }
+        
+        // 按句子分割过长的页面
+        const sentences = pageText.split(/[。！？.!?]\s*/);
+        let tempChunk = '';
+        let tempTokens = 0;
+        
+        for (const sentence of sentences) {
+          if (!sentence.trim()) continue;
+          
+          const sentenceTokens = estimateTokens(sentence);
+          
+          if (tempTokens + sentenceTokens > maxTokens && tempChunk) {
+            chunks.push(tempChunk.trim());
+            tempChunk = sentence;
+            tempTokens = sentenceTokens;
+          } else {
+            tempChunk += (tempChunk ? '。' : '') + sentence;
+            tempTokens += sentenceTokens;
+          }
+        }
+        
+        if (tempChunk) {
+          currentChunk = tempChunk;
+          currentTokens = tempTokens;
+        }
+      } else {
+        // 检查是否可以添加到当前块
+        if (currentTokens + pageTokens > maxTokens && currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = pageText;
+          currentTokens = pageTokens;
+        } else {
+          currentChunk += (currentChunk ? '\n\n' : '') + pageText;
+          currentTokens += pageTokens;
+        }
+      }
+    }
+    
+    // 添加最后一块
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
+  }
+
+  // 生成分段摘要
+  async generateChunkSummary(text, llmUrl, llmModel, llmApiKey, maxTokens) {
+    try {
+      // 估算字符到token的转换（粗略计算）
+      const estimateChars = (tokens) => {
+        // 假设中英文混合，平均每token约3个字符
+        return Math.floor(tokens * 3);
+      };
+      
+      const maxChars = estimateChars(maxTokens);
+      
+      const prompt = `请为以下论文片段生成一个简洁的摘要，摘要应该：
+1. 提取关键信息和核心观点
+2. 保持逻辑结构完整
+3. 字数控制在${maxChars}字符以内
+4. 用中文回答，格式清晰
+
+论文片段：
+${text}
+
+请直接返回摘要内容，不要添加"摘要："等前缀。`;
+
+      const summary = await this.callLLMAPI(prompt, llmUrl, llmModel, llmApiKey);
+      
+      // 如果摘要过长，进行截断
+      if (summary && summary.length > maxChars) {
+        return summary.substring(0, maxChars - 3) + '...';
+      }
+      
+      return summary || '摘要生成失败';
+      
+    } catch (error) {
+      console.error('生成摘要失败:', error);
+      return `摘要生成失败: ${error.message}`;
+    }
+  }
+
+  // 解读单个文本段
+  async interpretSingleChunk(text, llmUrl, llmModel, llmApiKey, interpretationPrompt, contentElement, chunkTitle) {
+    try {
+      // 构建针对分段的提示词
+      let prompt;
+      if (chunkTitle === '整篇论文') {
+        prompt = interpretationPrompt.replace('{text}', text);
+      } else {
+        prompt = `请对以下论文片段进行专业解读分析（${chunkTitle}）：
+
+${interpretationPrompt.replace('{text}', text)}
+
+请注意：这是论文的一个片段，请重点分析此片段的内容，不要重复分析其他部分。`;
+      }
+
+      // 调用大模型API进行流式解读
+      await this.callLLMAPIStream(prompt, llmUrl, llmModel, llmApiKey, contentElement);
+      
+      // 如果是整篇论文解读，保存解读结果
+      if (chunkTitle === '整篇论文') {
+        setTimeout(() => {
+          try {
+            // 对于整篇论文解读，保存整个父级容器的内容
+            const parentElement = contentElement.parentElement;
+            if (parentElement) {
+              this.saveInterpretation(parentElement.innerHTML);
+            }
+          } catch (error) {
+            console.error('保存整篇解读结果失败:', error);
+          }
+        }, 1000);
+      }
+      
+    } catch (error) {
+      console.error(`解读${chunkTitle}失败:`, error);
+      contentElement.innerHTML = `<div style="color: #e74c3c;">解读失败: ${error.message}</div>`;
     }
   }
 
@@ -1768,6 +2651,141 @@ class PaperReader {
       console.log('应用状态已保存:', state);
     } catch (error) {
       console.error('保存应用状态失败:', error);
+    }
+  }
+
+  // 生成文件唯一标识
+  generateFileHash(filePath) {
+    try {
+      const fs = require('fs');
+      const stats = fs.statSync(filePath);
+      // 使用文件路径和文件大小、修改时间生成简单的哈希
+      const hashSource = `${filePath}_${stats.size}_${stats.mtime.getTime()}`;
+      return btoa(hashSource).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+    } catch (error) {
+      console.error('生成文件哈希失败:', error);
+      // 如果失败，使用文件路径的简单编码
+      return btoa(filePath).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+    }
+  }
+
+  // 保存解读结果
+  saveInterpretation(interpretationContent) {
+    try {
+      if (!this.lastFilePath || !interpretationContent) {
+        console.log('无法保存解读结果：缺少文件路径或解读内容');
+        return;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const interpretationData = {
+        filePath: this.lastFilePath,
+        timestamp: new Date().toISOString(),
+        content: interpretationContent,
+        fileHash: fileHash
+      };
+
+      localStorage.setItem(`interpretation_${fileHash}`, JSON.stringify(interpretationData));
+      console.log('解读结果已保存:', { fileHash, filePath: this.lastFilePath });
+    } catch (error) {
+      console.error('保存解读结果失败:', error);
+    }
+  }
+
+  // 保存大纲结果
+  saveOutline(outlineData, isAiGenerated = false) {
+    try {
+      if (!this.lastFilePath || !outlineData) {
+        console.log('无法保存大纲结果：缺少文件路径或大纲数据');
+        return;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const outlineInfo = {
+        filePath: this.lastFilePath,
+        timestamp: new Date().toISOString(),
+        data: outlineData,
+        isAiGenerated: isAiGenerated,
+        fileHash: fileHash
+      };
+
+      localStorage.setItem(`outline_${fileHash}`, JSON.stringify(outlineInfo));
+      console.log('大纲结果已保存:', { fileHash, filePath: this.lastFilePath, isAiGenerated });
+    } catch (error) {
+      console.error('保存大纲结果失败:', error);
+    }
+  }
+
+  // 加载保存的解读结果
+  loadSavedInterpretation() {
+    try {
+      if (!this.lastFilePath) {
+        return;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const savedData = localStorage.getItem(`interpretation_${fileHash}`);
+      
+      if (savedData) {
+        const interpretationData = JSON.parse(savedData);
+        const interpretationContent = document.getElementById('interpretation-content');
+        
+        if (interpretationContent && interpretationData.content) {
+          // 添加一个提示，表明这是之前保存的解读结果
+          const savedIndicator = `
+            <div style="background: #e8f5e8; border: 1px solid #c3e6c3; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+              <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <span style="color: #155724; font-weight: bold;">💾 已加载上次的解读结果</span>
+                <button id="refresh-interpretation" style="margin-left: auto; background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">重新解读</button>
+              </div>
+              <div style="color: #155724; font-size: 12px;">
+                保存时间: ${new Date(interpretationData.timestamp).toLocaleString()}
+              </div>
+            </div>
+          `;
+          
+          interpretationContent.innerHTML = savedIndicator + interpretationData.content;
+          
+          // 添加重新解读按钮的事件监听
+          const refreshBtn = document.getElementById('refresh-interpretation');
+          if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+              this.interpretCurrentPage();
+            });
+          }
+          
+          console.log('已加载保存的解读结果:', { fileHash, timestamp: interpretationData.timestamp });
+        }
+      }
+    } catch (error) {
+      console.error('加载保存的解读结果失败:', error);
+    }
+  }
+
+  // 加载保存的大纲结果
+  loadSavedOutline() {
+    try {
+      if (!this.lastFilePath) {
+        return null;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const savedData = localStorage.getItem(`outline_${fileHash}`);
+      
+      if (savedData) {
+        const outlineInfo = JSON.parse(savedData);
+        console.log('找到保存的大纲结果:', { 
+          fileHash, 
+          timestamp: outlineInfo.timestamp, 
+          isAiGenerated: outlineInfo.isAiGenerated 
+        });
+        return outlineInfo;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('加载保存的大纲结果失败:', error);
+      return null;
     }
   }
 
