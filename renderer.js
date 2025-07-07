@@ -42,6 +42,9 @@ class PaperReader {
     this.setupPDFViewer();
     this.bindEvents();
     
+    // 应用字体大小设置
+    this.applyTranslationFontSize();
+    
     // 检查版本更新
     this.checkVersionUpdate();
     
@@ -177,6 +180,20 @@ class PaperReader {
 
     document.getElementById('test-llm').addEventListener('click', () => {
       this.testLLM();
+    });
+
+    // 字体大小实时预览
+    document.getElementById('translation-font-size').addEventListener('input', (e) => {
+      const fontSize = parseInt(e.target.value) || 14;
+      // 限制在12-24范围内
+      const clampedSize = Math.max(12, Math.min(24, fontSize));
+      if (clampedSize !== fontSize) {
+        e.target.value = clampedSize;
+      }
+      
+      // 实时应用字体大小
+      this.translationFontSize = clampedSize;
+      this.applyTranslationFontSize();
     });
 
     // 添加窗口大小改变事件监听器
@@ -906,7 +923,9 @@ class PaperReader {
     document.getElementById('llm-api-key').value = settings.llmApiKey || '';
     document.getElementById('interpretation-prompt').value = settings.interpretationPrompt || '';
     document.getElementById('enable-scroll-page-turn').checked = settings.enableScrollPageTurn !== false; // 默认为true
+    document.getElementById('enable-pdf-outline').checked = settings.enablePdfOutline !== false; // 默认为true
     document.getElementById('enable-ai-outline').checked = settings.enableAiOutline !== false; // 默认为true
+    document.getElementById('translation-font-size').value = settings.translationFontSize || 14;
     
     // 显示版本号
     const packageJson = require('./package.json');
@@ -919,6 +938,60 @@ class PaperReader {
     document.getElementById('settings-modal').style.display = 'none';
   }
 
+  // 应用字体大小到翻译区域
+  applyTranslationFontSize() {
+    const fontSize = this.translationFontSize || 14;
+    
+    // 应用到翻译内容区域及其子元素
+    const translationContent = document.getElementById('translation-content');
+    if (translationContent) {
+      translationContent.style.fontSize = fontSize + 'px';
+      // 确保子元素也使用相同的字体大小
+      translationContent.style.setProperty('--translation-font-size', fontSize + 'px');
+    }
+    
+    // 应用到选择翻译区域及其子元素
+    const selectionTranslationContent = document.getElementById('selection-translation-content');
+    if (selectionTranslationContent) {
+      selectionTranslationContent.style.fontSize = fontSize + 'px';
+      // 确保子元素也使用相同的字体大小
+      selectionTranslationContent.style.setProperty('--translation-font-size', fontSize + 'px');
+    }
+    
+    // 应用到动态生成的翻译内容
+    const style = document.createElement('style');
+    style.id = 'dynamic-translation-font-size';
+    style.textContent = `
+      #translation-content .translated-text,
+      #translation-content .translated-text p,
+      #translation-content .translation-text,
+      #translation-content .original-text,
+      #translation-content .original-text p,
+      #translation-content .error,
+      #translation-content .loading,
+      #selection-translation-content .translated-text,
+      #selection-translation-content .translated-text p,
+      #selection-translation-content .translation-text,
+      #selection-translation-content .original-text,
+      #selection-translation-content .original-text p,
+      #selection-translation-content .error,
+      #selection-translation-content .loading {
+        font-size: ${fontSize}px !important;
+      }
+    `;
+    
+    // 移除旧的样式
+    const oldStyle = document.getElementById('dynamic-translation-font-size');
+    if (oldStyle) {
+      oldStyle.remove();
+    }
+    
+    // 添加新的样式
+    document.head.appendChild(style);
+    
+    console.log('字体大小已应用:', fontSize + 'px');
+  }
+
   saveSettings() {
     const settings = {
       proxyUrl: document.getElementById('proxy-url').value.trim(),
@@ -928,7 +1001,9 @@ class PaperReader {
       llmApiKey: document.getElementById('llm-api-key').value.trim(),
       interpretationPrompt: document.getElementById('interpretation-prompt').value.trim(),
       enableScrollPageTurn: document.getElementById('enable-scroll-page-turn').checked,
-      enableAiOutline: document.getElementById('enable-ai-outline').checked
+      enablePdfOutline: document.getElementById('enable-pdf-outline').checked,
+      enableAiOutline: document.getElementById('enable-ai-outline').checked,
+      translationFontSize: parseInt(document.getElementById('translation-font-size').value) || 14
     };
     
     // 保存到localStorage
@@ -936,7 +1011,12 @@ class PaperReader {
     
     // 更新缓存的设置
     this.enableScrollPageTurn = settings.enableScrollPageTurn;
+    this.enablePdfOutline = settings.enablePdfOutline;
     this.enableAiOutline = settings.enableAiOutline;
+    this.translationFontSize = settings.translationFontSize;
+    
+    // 应用字体大小到翻译区域
+    this.applyTranslationFontSize();
     
     // 设置全局代理
     if (settings.proxyUrl) {
@@ -961,7 +1041,9 @@ class PaperReader {
         this.llmApiKey = settings.llmApiKey || '';
         this.interpretationPrompt = settings.interpretationPrompt || '';
         this.enableScrollPageTurn = settings.enableScrollPageTurn !== false; // 缓存设置，默认为true
+        this.enablePdfOutline = settings.enablePdfOutline !== false; // 缓存PDF大纲设置，默认为true
         this.enableAiOutline = settings.enableAiOutline !== false; // 缓存AI目录设置，默认为true
+        this.translationFontSize = settings.translationFontSize || 14; // 翻译区域字体大小，默认14px
         
         // 加载时设置全局代理
         if (this.proxyUrl) {
@@ -993,7 +1075,9 @@ class PaperReader {
 
 请用中文回答，格式要清晰易读。`,
       enableScrollPageTurn: true,
-      enableAiOutline: true
+      enablePdfOutline: true,
+      enableAiOutline: true,
+      translationFontSize: 14
     };
   }
 
@@ -1097,16 +1181,18 @@ class PaperReader {
         return;
       }
 
-      // 没有保存的大纲，尝试获取PDF自带的大纲
-      const pdfOutline = await this.currentPdf.getOutline();
-      if (pdfOutline && pdfOutline.length > 0) {
-        this.displayOutline(pdfOutline);
-        // 保存PDF内置大纲
-        this.saveOutline(pdfOutline, false);
-        return;
+      // 如果启用了PDF内置大纲，尝试获取PDF自带的大纲
+      if (this.enablePdfOutline) {
+        const pdfOutline = await this.currentPdf.getOutline();
+        if (pdfOutline && pdfOutline.length > 0) {
+          this.displayOutline(pdfOutline);
+          // 保存PDF内置大纲
+          this.saveOutline(pdfOutline, false);
+          return;
+        }
       }
 
-      // 如果PDF没有大纲，根据设置决定是否使用大模型提取目录
+      // 如果禁用了PDF内置大纲或PDF没有大纲，根据设置决定是否使用大模型提取目录
       if (this.enableAiOutline) {
         await this.extractOutlineWithLLM();
       } else {
@@ -1142,14 +1228,21 @@ class PaperReader {
 
       // 检查设置
       const settings = this.loadSettings();
-      if (!settings.enableAiOutline) {
-        // 如果没有启用AI大纲，只显示PDF自带大纲
+      
+      // 如果启用了PDF内置大纲且没有启用AI大纲，只显示PDF自带大纲
+      if (settings.enablePdfOutline && !settings.enableAiOutline) {
         const pdfOutline = await this.currentPdf.getOutline();
         if (pdfOutline && pdfOutline.length > 0) {
           this.displayOutline(pdfOutline);
         } else {
           container.innerHTML = '<div class="loading">该PDF没有内置大纲，请在设置中启用AI智能目录提取</div>';
         }
+        return;
+      }
+      
+      // 如果没有启用AI大纲，显示相应提示
+      if (!settings.enableAiOutline) {
+        container.innerHTML = '<div class="loading">请在设置中启用AI智能目录提取</div>';
         return;
       }
 

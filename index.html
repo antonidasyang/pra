@@ -145,9 +145,25 @@
           </div>
           <div class="setting-item">
             <label>
+              <input type="checkbox" id="enable-pdf-outline" />
+              优先使用PDF内置大纲 (禁用则一律使用AI解析大纲)
+            </label>
+          </div>
+          <div class="setting-item">
+            <label>
               <input type="checkbox" id="enable-ai-outline" />
               启用AI智能目录提取 (当PDF无内置目录时自动使用AI分析)
             </label>
+          </div>
+          <div class="setting-item">
+            <div style="display: flex; align-items: center; margin-bottom: 4px;">
+              <label for="translation-font-size" style="margin-right: 8px;">翻译区域字体大小:</label>
+              <input type="number" id="translation-font-size" min="12" max="24" step="1" value="14" />
+              <span style="margin-left: 4px;">px</span>
+            </div>
+            <small style="color: #666; font-size: 11px; display: block;">
+              设置翻译内容的字体大小（范围：12-24px）
+            </small>
           </div>
           <div class="setting-item">
             <button class="btn" id="save-settings">保存设置</button>
