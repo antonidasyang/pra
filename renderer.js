@@ -86,6 +86,12 @@ class PaperReader {
         // 检查并加载上次的解读结果
         this.loadSavedInterpretation();
         
+        // 如果当前在翻译标签页，加载当前页面的翻译结果
+        const translationTab = document.getElementById('translation-tab');
+        if (translationTab && translationTab.classList.contains('active')) {
+          this.autoLoadPageTranslation(this.lastPage);
+        }
+        
         this.showMessage('已恢复上次的阅读状态');
         this.updatePageInfo();
         this.updateZoomButtons();
@@ -534,6 +540,12 @@ class PaperReader {
         // 检查并加载上次的解读结果
         this.loadSavedInterpretation();
         
+        // 如果当前在翻译标签页，加载当前页面的翻译结果
+        const translationTab = document.getElementById('translation-tab');
+        if (translationTab && translationTab.classList.contains('active')) {
+          this.autoLoadPageTranslation(1);
+        }
+        
         // 保存应用状态
         this.saveAppState();
       }
@@ -672,6 +684,12 @@ class PaperReader {
       
       // 更新侧边栏中的目录高亮
       this.updateOutlineHighlight(pageNumber);
+      
+      // 检查当前是否在翻译标签页，如果是则自动加载该页的翻译结果
+      const translationTab = document.getElementById('translation-tab');
+      if (translationTab && translationTab.classList.contains('active')) {
+        this.autoLoadPageTranslation(pageNumber);
+      }
       
       // 保存应用状态
       this.saveAppState();
@@ -816,6 +834,58 @@ class PaperReader {
     }
 
     try {
+      // 首先检查是否有保存的翻译结果
+      const savedTranslation = this.loadSavedPageTranslation(this.currentPage);
+      if (savedTranslation && savedTranslation.content) {
+        console.log('使用保存的翻译结果');
+        
+        // 显示保存的翻译，并添加时间提示
+        const container = document.getElementById('translation-content');
+        const savedIndicator = `
+          <div style="background: #e8f5e8; border: 1px solid #c3e6c3; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <span style="color: #155724; font-weight: bold;">💾 已加载第${this.currentPage}页的翻译结果</span>
+              <button id="refresh-translation" style="margin-left: auto; background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">重新翻译</button>
+            </div>
+            <div style="color: #155724; font-size: 12px;">
+              保存时间: ${new Date(savedTranslation.timestamp).toLocaleString()}
+            </div>
+          </div>
+        `;
+        
+        container.innerHTML = savedIndicator + savedTranslation.content;
+        
+        // 添加重新翻译按钮的事件监听
+        const refreshBtn = document.getElementById('refresh-translation');
+        if (refreshBtn) {
+          refreshBtn.addEventListener('click', () => {
+            this.translateCurrentPageFresh();
+          });
+        }
+        
+        return;
+      }
+
+      // 如果没有保存的翻译结果，进行新的翻译
+      await this.translateCurrentPageFresh();
+    } catch (error) {
+      this.showError('翻译失败: ' + error.message);
+    }
+  }
+
+  // 执行新的翻译（不检查缓存）
+  async translateCurrentPageFresh() {
+    if (!this.currentPdf) {
+      this.showError('请先加载PDF文件');
+      return;
+    }
+
+    if (!this.currentPageParagraphs || this.currentPageParagraphs.length === 0) {
+      this.showError('当前页面没有可翻译的文本内容');
+      return;
+    }
+
+    try {
       // 使用预先处理好的段落
       const paragraphs = this.currentPageParagraphs;
       
@@ -889,6 +959,12 @@ class PaperReader {
             }
           }
         }
+      }
+      
+      // 翻译完成后保存结果
+      const finalContent = container.innerHTML;
+      if (finalContent && this.currentPage) {
+        this.savePageTranslation(this.currentPage, finalContent);
       }
       
       return container.innerHTML;
@@ -1073,7 +1149,9 @@ class PaperReader {
 论文内容：
 {text}
 
-请用中文回答，格式要清晰易读。`,
+请用中文回答，格式要清晰易读。
+/NO_THINK
+`,
       enableScrollPageTurn: true,
       enablePdfOutline: true,
       enableAiOutline: true,
@@ -2154,6 +2232,11 @@ ${combinedText}
     if (tabName === 'translation') {
       document.getElementById('translation-tab').classList.add('active');
       document.getElementById('translation-pane').classList.add('active');
+      
+      // 切换到翻译标签页时，自动加载当前页面的翻译结果
+      if (this.currentPdf && this.currentPage) {
+        this.autoLoadPageTranslation(this.currentPage);
+      }
     } else if (tabName === 'interpretation') {
       document.getElementById('interpretation-tab').classList.add('active');
       document.getElementById('interpretation-pane').classList.add('active');
@@ -2783,6 +2866,222 @@ ${interpretationPrompt.replace('{text}', text)}
     } catch (error) {
       console.error('保存解读结果失败:', error);
     }
+  }
+
+  // 保存单页翻译结果
+  savePageTranslation(pageNumber, translationContent) {
+    try {
+      if (!this.lastFilePath || !translationContent || !pageNumber) {
+        console.log('无法保存翻译结果：缺少文件路径、翻译内容或页码');
+        return;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const translationData = {
+        filePath: this.lastFilePath,
+        pageNumber: pageNumber,
+        timestamp: new Date().toISOString(),
+        content: translationContent,
+        fileHash: fileHash
+      };
+
+      localStorage.setItem(`translation_${fileHash}_${pageNumber}`, JSON.stringify(translationData));
+      console.log('翻译结果已保存:', { fileHash, pageNumber, filePath: this.lastFilePath });
+    } catch (error) {
+      console.error('保存翻译结果失败:', error);
+    }
+  }
+
+  // 加载保存的单页翻译结果
+  loadSavedPageTranslation(pageNumber) {
+    try {
+      if (!this.lastFilePath || !pageNumber) {
+        return null;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const savedData = localStorage.getItem(`translation_${fileHash}_${pageNumber}`);
+      
+      if (savedData) {
+        const translationData = JSON.parse(savedData);
+        console.log('找到保存的翻译结果:', { 
+          fileHash, 
+          pageNumber,
+          timestamp: translationData.timestamp 
+        });
+        return translationData;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('加载保存的翻译结果失败:', error);
+      return null;
+    }
+  }
+
+  // 自动加载页面翻译结果
+  autoLoadPageTranslation(pageNumber) {
+    try {
+      const savedTranslation = this.loadSavedPageTranslation(pageNumber);
+      const container = document.getElementById('translation-content');
+      
+      if (savedTranslation && savedTranslation.content) {
+        console.log(`自动加载第${pageNumber}页的翻译结果`);
+        
+        // 获取翻译统计信息
+        const stats = this.getCurrentDocumentTranslationStats();
+        
+        // 显示保存的翻译，并添加时间提示和统计信息
+        const savedIndicator = `
+          <div style="background: #e8f5e8; border: 1px solid #c3e6c3; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <span style="color: #155724; font-weight: bold;">💾 已加载第${pageNumber}页的翻译结果</span>
+              <button id="refresh-translation" style="margin-left: auto; background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">重新翻译</button>
+            </div>
+            <div style="color: #155724; font-size: 12px; margin-bottom: 8px;">
+              保存时间: ${new Date(savedTranslation.timestamp).toLocaleString()}
+            </div>
+            <div style="color: #155724; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+              <button id="clear-translations" style="background: #dc3545; color: white; border: none; padding: 2px 8px; border-radius: 3px; font-size: 10px; cursor: pointer;">清理缓存</button>
+            </div>
+          </div>
+        `;
+        
+        // 生成进度条
+        const progressBar = this.generateTranslationProgressBar(stats);
+        
+        container.innerHTML = savedIndicator + progressBar + savedTranslation.content;
+        
+        // 添加重新翻译按钮的事件监听
+        const refreshBtn = document.getElementById('refresh-translation');
+        if (refreshBtn) {
+          refreshBtn.addEventListener('click', () => {
+            this.translateCurrentPageFresh();
+          });
+        }
+        
+        // 添加清理缓存按钮的事件监听
+        const clearBtn = document.getElementById('clear-translations');
+        if (clearBtn) {
+          clearBtn.addEventListener('click', () => {
+            if (confirm('确定要清理当前文档的所有翻译缓存吗？此操作不可恢复。')) {
+              this.clearCurrentDocumentTranslations();
+            }
+          });
+        }
+      } else {
+        // 获取翻译统计信息
+        const stats = this.getCurrentDocumentTranslationStats();
+        
+        // 如果没有保存的翻译结果，显示提示
+        const progressBar = this.generateTranslationProgressBar(stats);
+        
+        container.innerHTML = `
+          <div style="text-align: center; padding: 40px; color: #6c757d;">
+            <div style="margin-bottom: 10px;">📄 第${pageNumber}页</div>
+            <div style="font-size: 14px; margin-bottom: 15px;">该页面尚未翻译，点击"翻译当前页"按钮开始翻译</div>
+          </div>
+          ${progressBar}
+        `;
+      }
+    } catch (error) {
+      console.error('自动加载页面翻译失败:', error);
+      const container = document.getElementById('translation-content');
+      container.innerHTML = `<div class="error">加载翻译结果失败: ${error.message}</div>`;
+    }
+  }
+
+  // 清理当前文档的翻译缓存
+  clearCurrentDocumentTranslations() {
+    try {
+      if (!this.lastFilePath) {
+        this.showError('没有加载的文档');
+        return;
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      let clearedCount = 0;
+      
+      // 遍历localStorage，找到所有属于当前文档的翻译缓存
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`translation_${fileHash}_`)) {
+          localStorage.removeItem(key);
+          clearedCount++;
+        }
+      }
+      
+      if (clearedCount > 0) {
+        this.showMessage(`已清理 ${clearedCount} 页的翻译缓存`);
+        // 如果当前在翻译标签页，刷新显示
+        const translationTab = document.getElementById('translation-tab');
+        if (translationTab && translationTab.classList.contains('active')) {
+          this.autoLoadPageTranslation(this.currentPage);
+        }
+      } else {
+        this.showMessage('当前文档没有翻译缓存');
+      }
+    } catch (error) {
+      console.error('清理翻译缓存失败:', error);
+      this.showError('清理翻译缓存失败: ' + error.message);
+    }
+  }
+
+  // 获取当前文档的翻译统计信息
+  getCurrentDocumentTranslationStats() {
+    try {
+      if (!this.lastFilePath) {
+        return { totalPages: 0, translatedPages: 0, pages: [] };
+      }
+
+      const fileHash = this.generateFileHash(this.lastFilePath);
+      const translatedPages = [];
+      
+      // 遍历localStorage，找到所有属于当前文档的翻译缓存
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`translation_${fileHash}_`)) {
+          const pageNumber = parseInt(key.split('_').pop());
+          if (pageNumber) {
+            translatedPages.push(pageNumber);
+          }
+        }
+      }
+      
+      return {
+        totalPages: this.totalPages || 0,
+        translatedPages: translatedPages.length,
+        pages: translatedPages.sort((a, b) => a - b)
+      };
+    } catch (error) {
+      console.error('获取翻译统计失败:', error);
+      return { totalPages: 0, translatedPages: 0, pages: [] };
+    }
+  }
+
+  // 生成翻译进度条HTML
+  generateTranslationProgressBar(stats) {
+    if (stats.totalPages === 0) return '';
+    
+    const progressPercent = Math.round((stats.translatedPages / stats.totalPages) * 100);
+    const progressColor = progressPercent === 100 ? '#28a745' : progressPercent > 50 ? '#ffc107' : '#007bff';
+    
+    return `
+      <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; margin: 0 20px 15px 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="color: #495057; font-size: 12px; font-weight: bold;">📊 翻译进度</span>
+          <span style="color: #6c757d; font-size: 11px;">${stats.translatedPages}/${stats.totalPages} 页 (${progressPercent}%)</span>
+        </div>
+        <div style="width: 100%; height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden;">
+          <div style="height: 100%; background: ${progressColor}; width: ${progressPercent}%; transition: width 0.3s ease;"></div>
+        </div>
+        ${stats.pages.length > 0 ? `
+          <div style="color: #6c757d; font-size: 10px; margin-top: 6px;">
+            已翻译页面: ${stats.pages.join(', ')}
+          </div>
+        ` : ''}
+      </div>
+    `;
   }
 
   // 保存大纲结果
